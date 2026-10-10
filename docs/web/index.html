@@ -1,0 +1,17 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Army Girls: Idle Assault RPG</title><style>html,body{margin:0;min-height:100%;background:#151a16;color:#f5f5f2;font:16px system-ui,sans-serif}main{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center}button{margin-top:16px;padding:12px 32px;border:1px solid #fff1b6;background:#ffd83d;color:#151a16;font:inherit;cursor:pointer}</style></head><body><main><p id="preview-message">게임을 불러오는 중… / Loading game…</p><button id="preview-retry" hidden></button></main><script>(function startPreview(){
+ const ko=navigator.language.startsWith('ko'),message=document.getElementById('preview-message'),retry=document.getElementById('preview-retry');
+ document.documentElement.lang=ko?'ko':'en';retry.textContent=ko?'다시 시도':'Try Again';
+ async function load(){
+  retry.hidden=true;message.textContent=ko?'게임을 불러오는 중…':'Loading game…';
+  try{
+   const metadata=await fetch('build-info.json?latest='+Date.now(),{cache:'no-store'});
+   if(!metadata.ok)throw Error('metadata');
+   const info=await metadata.json();
+   if(typeof info.entry!=='string'||!/^app(?:\.[a-zA-Z0-9_-]+)*\.html$/.test(info.entry))throw Error('entry');
+   const entry=await fetch(info.entry);
+   if(!entry.ok)throw Error('entry');
+   const html=await entry.text();document.open();document.write(html);document.close();
+  }catch{message.textContent=ko?'게임을 불러오지 못했습니다. 다시 시도해 주세요.':'Could not load the game. Please try again.';retry.hidden=false;}
+ }
+ retry.onclick=load;void load();
+})();</script></body></html>

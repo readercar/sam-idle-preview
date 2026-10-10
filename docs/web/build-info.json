@@ -1,0 +1,11 @@
+{
+  "name": "Three Kingdoms: Idle Clash",
+  "version": "0.1.1",
+  "builtAt": "2026-10-10T07:32:57.224Z",
+  "engine": "Cocos Creator 3.8.8",
+  "entry": "app.0.1.1.html",
+  "buildVersion": "0.1.1",
+  "policyVersion": "0.1.0",
+  "sourceCommit": "67a01cb5042bd56300825f22c2b2863eae818234",
+  "tag": "preview-0.1.1"
+}
