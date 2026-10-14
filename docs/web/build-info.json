@@ -1,11 +1,11 @@
 {
-  "name": "Three Kingdoms: Idle Clash",
-  "version": "0.1.1",
-  "builtAt": "2026-10-10T07:32:57.224Z",
+  "name": "삼국지 : 방치해서 천하통일",
+  "version": "0.1.2",
+  "builtAt": "2026-10-14T02:41:42.154Z",
   "engine": "Cocos Creator 3.8.8",
-  "entry": "app.0.1.1.html",
-  "buildVersion": "0.1.1",
+  "entry": "app.0.1.2.html",
+  "buildVersion": "0.1.2",
   "policyVersion": "0.1.0",
-  "sourceCommit": "67a01cb5042bd56300825f22c2b2863eae818234",
-  "tag": "preview-0.1.1"
+  "sourceCommit": "6d2521349709161f1098b28c905967048a900134",
+  "tag": "preview-0.1.2"
 }
