@@ -9,8 +9,8 @@
         "05f8c47b-d2cf-45c5-b582-ea35dcd027a1",
         "05f8c47b-d2cf-45c5-b582-ea35dcd027a1@6c48a",
         "0686d136-6db6-4178-ad53-973f379c714c",
-        "06a8bc894",
         "075fc4a8-e524-4116-8cfc-30b8a1d46543",
+        "0b38b1cd5",
         "0c3c7ca3-5bfe-4473-b179-e052c5fde967",
         "0c5378bd-3ab6-496f-9461-2bd656171f6f",
         "0c5378bd-3ab6-496f-9461-2bd656171f6f@6c48a",
@@ -49,6 +49,10 @@
         "3a7582ac-423f-55e2-9d25-747712f573de",
         "3a7582ac-423f-55e2-9d25-747712f573de@6c48a",
         "3bc931e5-5ef5-4c14-ad86-fd0d1a5a7fa3",
+        "3c57b46f-b66f-4f95-b293-c2077824cdb8",
+        "3c57b46f-b66f-4f95-b293-c2077824cdb8@6c48a",
+        "3cc39ca9-1990-49c4-94b2-49154e8a979a",
+        "3cc39ca9-1990-49c4-94b2-49154e8a979a@6c48a",
         "40d549a7-36c0-46fd-97f3-9e0516a87691",
         "40d549a7-36c0-46fd-97f3-9e0516a87691@6c48a",
         "419a1b6c-a1e5-4da1-8f74-660bbb287de5",
@@ -96,12 +100,16 @@
         "6a2dd13f-b3af-51fa-9375-53e3b373fff4",
         "6ce9573b-1445-4072-8c70-34718aa3043a",
         "6ce9573b-1445-4072-8c70-34718aa3043a@6c48a",
+        "6d34f6b4-0cb5-4e89-a405-f3487e35d36d",
+        "6d34f6b4-0cb5-4e89-a405-f3487e35d36d@6c48a",
         "6f5f226f-d004-4d96-bc51-73a929d82175",
         "6fc57031-01f9-4543-b277-3fa537efef03",
         "71da3abc-08c0-4ab1-8e38-f68c5ee83eae",
         "75a23e9b-b109-4bbb-a5ba-5c3e67db4931",
         "76b8d3c4-64c9-5e17-ab25-9ff8c89187af",
         "77236106-cde5-4bc1-a6d7-897db20011b2",
+        "77a0506e-54c4-4b0b-878f-0c2f4d92be8a",
+        "77a0506e-54c4-4b0b-878f-0c2f4d92be8a@6c48a",
         "78f1804d-48a7-4660-b92f-e85b847a64f4",
         "7b0789f0-d3e7-4d6b-a12e-57d5838ecb96",
         "7bd5bdb5-320f-470d-9a98-ed937673e597",
@@ -112,6 +120,8 @@
         "7eee9e0e-1ba0-46bf-b191-d696e587e84c",
         "7eee9e0e-1ba0-46bf-b191-d696e587e84c@6c48a",
         "7ef0ed57-5a60-4d12-9dad-cbd479d65100",
+        "805678fa-2cb2-496e-8363-47fa59f38846",
+        "805678fa-2cb2-496e-8363-47fa59f38846@6c48a",
         "80a4486f-e336-4a41-a21c-fddfb6d3eeb2",
         "8245a8c5-c281-4229-9803-0892e2e08771",
         "842db0e8-bb2c-49df-b8cc-32f7939da4d7",
@@ -133,6 +143,8 @@
         "92d7a57b-da2d-4ece-931e-a1c6a47c2175",
         "92d7a57b-da2d-4ece-931e-a1c6a47c2175@6c48a",
         "93785ce6-35d0-5b04-a8a5-7d9c30ed16fa",
+        "93ea6f89-1de9-4fed-ac1b-7319fbd767fd",
+        "93ea6f89-1de9-4fed-ac1b-7319fbd767fd@6c48a",
         "93eea036-b629-4880-a98f-257678d6c1a2",
         "949f7a6a-ac15-4224-9c13-d2b43e4cba1d",
         "97884c60-4c4a-4bc0-9141-11e7cba89ded",
@@ -214,6 +226,8 @@
         "d55a5523-85f3-4722-9bf4-8fe9d910d243",
         "d5c9a419-64e7-5eb4-ae4a-84cdb139a9c4",
         "d705502a-b665-4b4f-b47e-4e9a5bde9590",
+        "d9ac100d-2878-4b09-a29c-0816bcaf958c",
+        "d9ac100d-2878-4b09-a29c-0816bcaf958c@6c48a",
         "d9ee7dcc-cb6d-44dd-8a6a-afbb12c9e141",
         "dc9c4da5-9d54-464d-b4fb-ed9967c51dda",
         "de835e4c-1b85-497b-9f62-214243618593",
@@ -229,6 +243,7 @@
         "e4dd83bf-8853-4938-8270-53921528c944",
         "e5c26476-9e3a-4512-ba3a-5f7e357052f5",
         "e6d4f04d-b04d-5778-9e48-cf8bc730294f",
+        "e7cd53e3-f104-4095-9695-c70ccdb4d1f2",
         "e7de15b1-1970-4a54-86ef-c02abeb4cd3b",
         "e7eb62a2-f120-4ddb-87f3-d2dda721b558",
         "ea11a0b8-7432-4626-af34-622c15825c44",
@@ -250,6 +265,11 @@
     "paths": {
         "4d3b66e5-7358-4581-8254-96a3e95e17a1": [
             "effects/battle-wipe",
+            "cc.EffectAsset",
+            1
+        ],
+        "e7cd53e3-f104-4095-9695-c70ccdb4d1f2": [
+            "effects/defeat-grayscale",
             "cc.EffectAsset",
             1
         ],
@@ -1173,6 +1193,46 @@
             "cc.Texture2D",
             1
         ],
+        "77a0506e-54c4-4b0b-878f-0c2f4d92be8a": [
+            "ui/three-kingdoms/downed-0",
+            "cc.ImageAsset",
+            1
+        ],
+        "77a0506e-54c4-4b0b-878f-0c2f4d92be8a@6c48a": [
+            "ui/three-kingdoms/downed-0/texture",
+            "cc.Texture2D",
+            1
+        ],
+        "805678fa-2cb2-496e-8363-47fa59f38846": [
+            "ui/three-kingdoms/downed-1",
+            "cc.ImageAsset",
+            1
+        ],
+        "805678fa-2cb2-496e-8363-47fa59f38846@6c48a": [
+            "ui/three-kingdoms/downed-1/texture",
+            "cc.Texture2D",
+            1
+        ],
+        "3cc39ca9-1990-49c4-94b2-49154e8a979a": [
+            "ui/three-kingdoms/downed-2",
+            "cc.ImageAsset",
+            1
+        ],
+        "3cc39ca9-1990-49c4-94b2-49154e8a979a@6c48a": [
+            "ui/three-kingdoms/downed-2/texture",
+            "cc.Texture2D",
+            1
+        ],
+        "3c57b46f-b66f-4f95-b293-c2077824cdb8": [
+            "ui/three-kingdoms/downed-3",
+            "cc.ImageAsset",
+            1
+        ],
+        "3c57b46f-b66f-4f95-b293-c2077824cdb8@6c48a": [
+            "ui/three-kingdoms/downed-3/texture",
+            "cc.Texture2D",
+            1
+        ],
         "8927a634-e4fb-4f92-9914-1b667d5ef04e": [
             "ui/three-kingdoms/exit-portal",
             "cc.ImageAsset",
@@ -1180,6 +1240,16 @@
         ],
         "8927a634-e4fb-4f92-9914-1b667d5ef04e@6c48a": [
             "ui/three-kingdoms/exit-portal/texture",
+            "cc.Texture2D",
+            1
+        ],
+        "6d34f6b4-0cb5-4e89-a405-f3487e35d36d": [
+            "ui/three-kingdoms/healing-loop",
+            "cc.ImageAsset",
+            1
+        ],
+        "6d34f6b4-0cb5-4e89-a405-f3487e35d36d@6c48a": [
+            "ui/three-kingdoms/healing-loop/texture",
             "cc.Texture2D",
             1
         ],
@@ -1433,6 +1503,16 @@
             "cc.Texture2D",
             1
         ],
+        "d9ac100d-2878-4b09-a29c-0816bcaf958c": [
+            "ui/three-kingdoms/tactic-effects",
+            "cc.ImageAsset",
+            1
+        ],
+        "d9ac100d-2878-4b09-a29c-0816bcaf958c@6c48a": [
+            "ui/three-kingdoms/tactic-effects/texture",
+            "cc.Texture2D",
+            1
+        ],
         "af835bd5-8aff-56c8-a0dd-0b3d7906ba40": [
             "ui/three-kingdoms/terrain-tiles",
             "cc.ImageAsset",
@@ -1440,6 +1520,16 @@
         ],
         "af835bd5-8aff-56c8-a0dd-0b3d7906ba40@6c48a": [
             "ui/three-kingdoms/terrain-tiles/texture",
+            "cc.Texture2D",
+            1
+        ],
+        "93ea6f89-1de9-4fed-ac1b-7319fbd767fd": [
+            "ui/three-kingdoms/title-logos",
+            "cc.ImageAsset",
+            1
+        ],
+        "93ea6f89-1de9-4fed-ac1b-7319fbd767fd@6c48a": [
+            "ui/three-kingdoms/title-logos/texture",
             "cc.Texture2D",
             1
         ],
@@ -1456,25 +1546,31 @@
     },
     "scenes": {},
     "packs": {
-        "06a8bc894": [
+        "0b38b1cd5": [
             "0c5378bd-3ab6-496f-9461-2bd656171f6f@6c48a",
             "1f14329d-bb91-4176-b503-ea5c8c509b7d@6c48a",
             "3a7582ac-423f-55e2-9d25-747712f573de@6c48a",
+            "3c57b46f-b66f-4f95-b293-c2077824cdb8@6c48a",
+            "3cc39ca9-1990-49c4-94b2-49154e8a979a@6c48a",
             "4c43fa22-0331-4dce-9e41-d5d9d9e505ed@6c48a",
             "05f8c47b-d2cf-45c5-b582-ea35dcd027a1@6c48a",
             "6ce9573b-1445-4072-8c70-34718aa3043a@6c48a",
+            "6d34f6b4-0cb5-4e89-a405-f3487e35d36d@6c48a",
             "7e36f625-5085-488c-ae67-43b6d521fe05@6c48a",
             "7eee9e0e-1ba0-46bf-b191-d696e587e84c@6c48a",
             "40d549a7-36c0-46fd-97f3-9e0516a87691@6c48a",
             "42cce988-7a86-5a4f-89fe-641562b3dd90@6c48a",
             "45e74d7e-3d4c-4dd5-a048-bd650f13484c@6c48a",
             "48adbfc2-aae0-4b6b-8e90-b5fd40a3cb13@6c48a",
+            "77a0506e-54c4-4b0b-878f-0c2f4d92be8a@6c48a",
             "87f8a7f5-d740-4a6f-8dd9-a7941a1e0d98@6c48a",
             "92bec3cd-6a93-4c84-a097-cef8d2b4c6c6@6c48a",
             "92d7a57b-da2d-4ece-931e-a1c6a47c2175@6c48a",
+            "93ea6f89-1de9-4fed-ac1b-7319fbd767fd@6c48a",
             "99de859d-714c-4a15-84ef-8ed1e747181c@6c48a",
             "8927a634-e4fb-4f92-9914-1b667d5ef04e@6c48a",
             "33817f03-7c76-4717-ae8f-f1ee17317715@6c48a",
+            "805678fa-2cb2-496e-8363-47fa59f38846@6c48a",
             "2653424b-2999-48a1-8a1e-32b8109505a3@6c48a",
             "4295563e-aebe-46f8-9b3b-011dad2a0d00@6c48a",
             "45202918-5181-55b1-949a-bf409a993387@6c48a",
@@ -1488,6 +1584,7 @@
             "c116e30f-2438-5604-98ab-1bcc20cb210b@6c48a",
             "c651c3e1-72ac-46c9-baad-3f2b47714615@6c48a",
             "d04aef60-a052-41e9-8a20-dd640813c6e2@6c48a",
+            "d9ac100d-2878-4b09-a29c-0816bcaf958c@6c48a",
             "e2dffe2f-188c-49ed-af40-c6b8ae69da20@6c48a",
             "e3d7cc0c-a211-4153-b5a2-408a3767abe7@6c48a",
             "f17af9d1-0891-4bcd-a540-0e10dbfb983b@6c48a"
@@ -1503,10 +1600,10 @@
             "ba492",
             "0686d136-6db6-4178-ad53-973f379c714c",
             "24b7d",
-            "06a8bc894",
-            "9a9d3",
             "075fc4a8-e524-4116-8cfc-30b8a1d46543",
             "b3988",
+            "0b38b1cd5",
+            "73541",
             "0c3c7ca3-5bfe-4473-b179-e052c5fde967",
             "3a646",
             "0c5378bd-3ab6-496f-9461-2bd656171f6f",
@@ -1573,10 +1670,14 @@
             "ba492",
             "3bc931e5-5ef5-4c14-ad86-fd0d1a5a7fa3",
             "5b382",
+            "3c57b46f-b66f-4f95-b293-c2077824cdb8",
+            "ba492",
+            "3cc39ca9-1990-49c4-94b2-49154e8a979a",
+            "ba492",
             "40d549a7-36c0-46fd-97f3-9e0516a87691",
             "ba492",
             "419a1b6c-a1e5-4da1-8f74-660bbb287de5",
-            "e8658",
+            "8e14b",
             "4295563e-aebe-46f8-9b3b-011dad2a0d00",
             "ba492",
             "42cce988-7a86-5a4f-89fe-641562b3dd90",
@@ -1651,6 +1752,8 @@
             "d9d0c",
             "6ce9573b-1445-4072-8c70-34718aa3043a",
             "ba492",
+            "6d34f6b4-0cb5-4e89-a405-f3487e35d36d",
+            "ba492",
             "6f5f226f-d004-4d96-bc51-73a929d82175",
             "64da1",
             "6fc57031-01f9-4543-b277-3fa537efef03",
@@ -1663,6 +1766,8 @@
             "1839b",
             "77236106-cde5-4bc1-a6d7-897db20011b2",
             "bb834",
+            "77a0506e-54c4-4b0b-878f-0c2f4d92be8a",
+            "ba492",
             "78f1804d-48a7-4660-b92f-e85b847a64f4",
             "b0b9f",
             "7b0789f0-d3e7-4d6b-a12e-57d5838ecb96",
@@ -1679,6 +1784,8 @@
             "ba492",
             "7ef0ed57-5a60-4d12-9dad-cbd479d65100",
             "541f6",
+            "805678fa-2cb2-496e-8363-47fa59f38846",
+            "ba492",
             "80a4486f-e336-4a41-a21c-fddfb6d3eeb2",
             "3ea74",
             "8245a8c5-c281-4229-9803-0892e2e08771",
@@ -1713,6 +1820,8 @@
             "ba492",
             "93785ce6-35d0-5b04-a8a5-7d9c30ed16fa",
             "3b62b",
+            "93ea6f89-1de9-4fed-ac1b-7319fbd767fd",
+            "ba492",
             "93eea036-b629-4880-a98f-257678d6c1a2",
             "8862e",
             "949f7a6a-ac15-4224-9c13-d2b43e4cba1d",
@@ -1853,6 +1962,8 @@
             "ff03f",
             "d705502a-b665-4b4f-b47e-4e9a5bde9590",
             "6c396",
+            "d9ac100d-2878-4b09-a29c-0816bcaf958c",
+            "ba492",
             "d9ee7dcc-cb6d-44dd-8a6a-afbb12c9e141",
             "7dd01",
             "dc9c4da5-9d54-464d-b4fb-ed9967c51dda",
@@ -1879,6 +1990,8 @@
             "42c6b",
             "e6d4f04d-b04d-5778-9e48-cf8bc730294f",
             "6e553",
+            "e7cd53e3-f104-4095-9695-c70ccdb4d1f2",
+            "a278b",
             "e7de15b1-1970-4a54-86ef-c02abeb4cd3b",
             "53637",
             "e7eb62a2-f120-4ddb-87f3-d2dda721b558",
@@ -1987,6 +2100,10 @@
             "d1a0b",
             "3bc931e5-5ef5-4c14-ad86-fd0d1a5a7fa3",
             "298ad",
+            "3c57b46f-b66f-4f95-b293-c2077824cdb8",
+            "73cb1",
+            "3cc39ca9-1990-49c4-94b2-49154e8a979a",
+            "98a1a",
             "40d549a7-36c0-46fd-97f3-9e0516a87691",
             "111de",
             "4295563e-aebe-46f8-9b3b-011dad2a0d00",
@@ -2061,6 +2178,8 @@
             "d6acb",
             "6ce9573b-1445-4072-8c70-34718aa3043a",
             "29a7c",
+            "6d34f6b4-0cb5-4e89-a405-f3487e35d36d",
+            "11b4e",
             "6f5f226f-d004-4d96-bc51-73a929d82175",
             "8ffc3",
             "6fc57031-01f9-4543-b277-3fa537efef03",
@@ -2073,6 +2192,8 @@
             "5b8fe",
             "77236106-cde5-4bc1-a6d7-897db20011b2",
             "46e6a",
+            "77a0506e-54c4-4b0b-878f-0c2f4d92be8a",
+            "db342",
             "78f1804d-48a7-4660-b92f-e85b847a64f4",
             "9e8fc",
             "7b0789f0-d3e7-4d6b-a12e-57d5838ecb96",
@@ -2089,6 +2210,8 @@
             "853a1",
             "7ef0ed57-5a60-4d12-9dad-cbd479d65100",
             "2e894",
+            "805678fa-2cb2-496e-8363-47fa59f38846",
+            "c3d10",
             "80a4486f-e336-4a41-a21c-fddfb6d3eeb2",
             "56a10",
             "8245a8c5-c281-4229-9803-0892e2e08771",
@@ -2121,6 +2244,8 @@
             "ece2c",
             "93785ce6-35d0-5b04-a8a5-7d9c30ed16fa",
             "6e1a6",
+            "93ea6f89-1de9-4fed-ac1b-7319fbd767fd",
+            "8f359",
             "93eea036-b629-4880-a98f-257678d6c1a2",
             "84226",
             "949f7a6a-ac15-4224-9c13-d2b43e4cba1d",
@@ -2259,6 +2384,8 @@
             "a762c",
             "d705502a-b665-4b4f-b47e-4e9a5bde9590",
             "0f4c4",
+            "d9ac100d-2878-4b09-a29c-0816bcaf958c",
+            "6fc1b",
             "dc9c4da5-9d54-464d-b4fb-ed9967c51dda",
             "76595",
             "de835e4c-1b85-497b-9f62-214243618593",
