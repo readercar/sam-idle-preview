@@ -1335,6 +1335,7 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
           this.footwork = new TacticalFootwork();
           this.searchTime = 0;
           this.nextSearch = new Map();
+          this.lostTargets = new Map();
           this.frameStart = new Map();
           this.actors = new Map();
           this.targets = new Map();
@@ -1410,6 +1411,7 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
           var _this$navigation;
           this.searchTime = 0;
           this.nextSearch.clear();
+          this.lostTargets.clear();
           this.footwork.reset();
           this.actionLocks.clear();
           this.frameStart.clear();
@@ -1428,7 +1430,15 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
             _available$filter$sor;
           var a = this.actors.get(id);
           if (!a) return (_available$ = available[0]) != null ? _available$ : -1;
-          if (this.searchTime < ((_this$nextSearch$get = this.nextSearch.get(id)) != null ? _this$nextSearch$get : 0)) return available.includes(a.target) ? a.target : -1;
+          // A lost target is a one-off event: react immediately, then throttle failed
+          // searches normally until a new target has actually been adopted.
+          var lost = a.target >= 0 && !available.includes(a.target) && this.lostTargets.get(id) !== a.target;
+          if (lost) {
+            var _this$navigation2;
+            this.lostTargets.set(id, a.target);
+            (_this$navigation2 = this.navigation) == null || _this$navigation2.retarget(a);
+          }
+          if (!lost && this.searchTime < ((_this$nextSearch$get = this.nextSearch.get(id)) != null ? _this$nextSearch$get : 0)) return available.includes(a.target) ? a.target : -1;
           this.nextSearch.set(id, this.searchTime + 1 + Math.abs(id * 7 + 3) % 9 * .2);
           var candidates = available.map(function (i) {
             return _this.targets.get(i);
@@ -1488,6 +1498,13 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
         _proto.advance = function advance(id, target, dt) {
           var a = this.actors.get(id);
           if (!a || !Number.isFinite(dt) || dt <= 0) return 0;
+          if (this.targets.has(target)) {
+            this.lostTargets["delete"](id);
+            if (a.target !== target) {
+              a.target = target;
+              a.angle = undefined;
+            }
+          }
           var lock = this.actionLocks.get(id);
           if (lock) {
             a.moving = false;
@@ -1518,8 +1535,8 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
             return _this2.navigation.canStand(p) && _this2.navigation.unitClear(p, p) && _this2.navigation.attackClear(p, e, false);
           })) return 0;
           if (this.inRange(id, target) && attackReach(a, e, range, profile.melee) && (!this.navigation || !this.navigation.needsSpace(a))) {
-            var _this$navigation2;
-            (_this$navigation2 = this.navigation) == null || _this$navigation2.stopApproach(a);
+            var _this$navigation3;
+            (_this$navigation3 = this.navigation) == null || _this$navigation3.stopApproach(a);
             a.moving = false;
             return dt;
           }
@@ -1642,12 +1659,10 @@ System.register("chunks:///_virtual/BattleApproach.ts", ['./rollupPluginModLoBab
   };
 });
 
-System.register("chunks:///_virtual/BattlefieldMap.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './BattlefieldTerrain.ts', './BattleNavigation.ts'], function (exports) {
-  var _extends, cclegacy, battlefieldTerrain, terrainCell, terrainWalkable, terrainCombatPosition, BattleNavigation;
+System.register("chunks:///_virtual/BattlefieldMap.ts", ['cc', './BattlefieldTerrain.ts', './BattleNavigation.ts'], function (exports) {
+  var cclegacy, battlefieldTerrain, terrainCell, terrainWalkable, terrainCombatPosition, BattleNavigation;
   return {
     setters: [function (module) {
-      _extends = module.extends;
-    }, function (module) {
       cclegacy = module.cclegacy;
     }, function (module) {
       battlefieldTerrain = module.battlefieldTerrain;
@@ -1718,36 +1733,46 @@ System.register("chunks:///_virtual/BattlefieldMap.ts", ['./rollupPluginModLoBab
           terrain: battlefieldTerrain(stage, width, height)
         };
       }
-      function battlefieldParty(map, ids) {
-        var offsets = [{
-          x: 112,
-          y: 104
-        }, {
-          x: 112,
-          y: -104
-        }, {
-          x: 216,
-          y: 156
-        }, {
-          x: 216,
-          y: 0
-        }, {
-          x: 216,
-          y: -156
-        }];
-        var slots = ids.map(function (_, i) {
-          return i < offsets.length ? offsets[i] : {
-            x: 320 + Math.floor((i - 5) / 5) * 104,
+      var VANGUARD_REAR_SLOTS = [{
+        x: -64,
+        y: 64
+      }, {
+        x: -64,
+        y: -64
+      }, {
+        x: -152,
+        y: 112
+      }, {
+        x: -152,
+        y: -112
+      }, {
+        x: -152,
+        y: 0
+      }];
+      function companionSlots(count) {
+        return Array.from({
+          length: count
+        }, function (_, i) {
+          return i < VANGUARD_REAR_SLOTS.length ? VANGUARD_REAR_SLOTS[i] : {
+            x: -256 - Math.floor((i - 5) / 5) * 104,
             y: [156, 78, 0, -78, -156][(i - 5) % 5]
           };
         });
-        var x = map.start.x + Math.min(0, map.width - 20 - map.start.x - Math.max.apply(Math, [0].concat(slots.map(function (p) {
-            return p.x;
-          })))),
+      }
+      function battlefieldParty(map, ids) {
+        // A steady leading point keeps recruitment from moving the captain. Two
+        // staggered rear ranks fit the normal five companions inside the camera.
+        var slots = companionSlots(ids.length);
+        var depth = Math.max.apply(Math, [152].concat(slots.map(function (p) {
+            return -p.x;
+          }))),
+          x = Math.max(20 + depth, Math.min(map.width - 20, map.start.x + depth)),
           y = Math.max(176, Math.min(map.height - 252, map.start.y));
-        return [_extends({
-          id: -1
-        }, map.start)].concat(ids.map(function (id, i) {
+        return [{
+          id: -1,
+          x: x,
+          y: map.start.y
+        }].concat(ids.map(function (id, i) {
           return {
             id: id,
             x: x + slots[i].x,
@@ -1757,28 +1782,7 @@ System.register("chunks:///_virtual/BattlefieldMap.ts", ['./rollupPluginModLoBab
       }
       /** Each companion owns a staggered following lane, independent of its roster ID. */
       function battlefieldFollowers(captain, ids) {
-        var offsets = [{
-          x: -72,
-          y: 88
-        }, {
-          x: -72,
-          y: -88
-        }, {
-          x: -152,
-          y: 144
-        }, {
-          x: -152,
-          y: -144
-        }, {
-          x: -176,
-          y: 0
-        }];
-        var slots = ids.map(function (_, i) {
-          return i < offsets.length ? offsets[i] : {
-            x: -272 - Math.floor((i - 5) / 5) * 104,
-            y: [156, 78, 0, -78, -156][(i - 5) % 5]
-          };
-        });
+        var slots = companionSlots(ids.length);
         // Shift the whole party near the left boundary instead of clamping many warriors to one point.
         var shift = Math.max(0, 30 - captain.x - Math.min.apply(Math, [0].concat(slots.map(function (p) {
           return p.x;
@@ -3014,6 +3018,11 @@ System.register("chunks:///_virtual/BattleNavigation.ts", ['./rollupPluginModLoB
         _proto.stopApproach = function stopApproach(a) {
           this.routes["delete"](a.id);
           this.reservations["delete"](a.id);
+        }
+        /** One immediate route attempt after target loss; subsequent failures keep the cadence. */;
+        _proto.retarget = function retarget(a) {
+          this.stopApproach(a);
+          this.retry.set(a.id, 0);
         };
         _proto.allyCost = function allyCost(a, p) {
           var cost = 0;
@@ -8197,8 +8206,8 @@ System.register("chunks:///_virtual/CombatBalance.ts", ['cc', './Balance.ts', '.
   };
 });
 
-System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './DownedPresentation.ts', './AttackTiming.ts', './SoulEnemyArt.ts', './SoulAllyMotion.ts', './Mercenaries.ts', './WarriorRunArt.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, cclegacy, isValid, Sprite, UITransform, Node, SpriteFrame, Rect, Size, Vec3, fallFrame, ATTACK_POST_DELAY_SECONDS, attackMotionTiming, SOUL_ENEMY_KEYS, isSoulAlly, soulAllyFrame, attackProfile, WARRIOR_RUN_CADENCE;
+System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './DownedPresentation.ts', './AttackTiming.ts', './SoulEnemyArt.ts', './SoulAllyMotion.ts', './Mercenaries.ts', './SoulRunPresentation.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, cclegacy, isValid, Sprite, UITransform, Node, SpriteFrame, Rect, Size, Vec3, fallFrame, ATTACK_POST_DELAY_SECONDS, attackMotionTiming, SOUL_ENEMY_KEYS, isSoulAlly, soulAllyFrame, attackProfile, showRun, smoothRunAvailable, runPoseOffset, runClockAfter;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -8225,7 +8234,10 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
     }, function (module) {
       attackProfile = module.attackProfile;
     }, function (module) {
-      WARRIOR_RUN_CADENCE = module.WARRIOR_RUN_CADENCE;
+      showRun = module.showRun;
+      smoothRunAvailable = module.smoothRunAvailable;
+      runPoseOffset = module.runPoseOffset;
+      runClockAfter = module.runClockAfter;
     }],
     execute: function () {
       cclegacy._RF.push({}, "09b25Jw9wpClJFvM/EuykSG", "CombatMotion", undefined);
@@ -8292,6 +8304,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
               moving: a.moving,
               runWeight: a.runWeight,
               runClock: a.runClock,
+              runStillSeconds: a.runStillSeconds,
               facing: Math.sign(((_a$rest = a.rest) == null ? void 0 : _a$rest.scale.x) || 1)
             };
           });
@@ -8312,6 +8325,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
               a.moving = old.moving;
               a.runWeight = old.runWeight;
               a.runClock = old.runClock;
+              a.runStillSeconds = old.runStillSeconds;
               if (a.rest) a.rest.scale.x = Math.abs(a.rest.scale.x) * old.facing;
               a.frame = -1;
             }
@@ -8397,6 +8411,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             if (on && this.actionLock(node) === 'attack') return;
             a.moving = on;
             if (on) {
+              a.runStillSeconds = 0;
               a.phase = 'idle';
               a.remaining = 0;
               a.queuedReady = undefined;
@@ -8717,6 +8732,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             a.moving = false;
             a.runWeight = 0;
             a.runClock = 0;
+            a.runStillSeconds = 1;
             a.frame = -1;
             if (isValid(_node, true)) this.render(_node, a);
           }
@@ -8735,10 +8751,10 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             _a$duration,
             _a$spriteKey,
             _a$id4,
-            _a$runWeight2,
-            _a$runClock2,
+            _a$runWeight3,
+            _a$runClock3,
             _this = this,
-            _a$runClock3;
+            _a$runClock4;
           if (a.down !== undefined) {
             var _a$id2;
             var pose = fallFrame(a.down, this.effects),
@@ -8769,13 +8785,18 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
           var enemy = (_a$spriteKey = a.spriteKey) != null && _a$spriteKey.startsWith('actors/enemy-') ? SOUL_ENEMY_KEYS[a.spriteKey.slice(13)] : undefined;
           var soul = enemy ? "soul-enemy/" + enemy : isSoulAlly(a.id) ? "soul/" + ((_a$id4 = a.id) != null ? _a$id4 : -1) : undefined;
           if (soul && this.ui.frames.has(soul + '/0')) {
-            var _a$runClock;
-            var _pose = soulAllyFrame(a.phase, !!a.moving, (_a$runClock = a.runClock) != null ? _a$runClock : 0, progress, effects ? a.clock : 0);
-            if (a.frame !== 100 + _pose && this.ui.paint(node, soul + '/' + _pose)) {
-              var _t = node.getComponent(UITransform);
-              _t.setContentSize(_t.height * 448 / 192, _t.height);
-              _t.setAnchorPoint(192 / 448, 6 / 192);
-              a.frame = 100 + _pose;
+            var _a$runStillSeconds, _a$runWeight2, _a$runClock, _a$runClock2, _a$id5;
+            var _running = a.phase === 'idle' && showRun(!!a.moving, (_a$runStillSeconds = a.runStillSeconds) != null ? _a$runStillSeconds : 1, (_a$runWeight2 = a.runWeight) != null ? _a$runWeight2 : 0);
+            var drawn = _running && !enemy && smoothRunAvailable(a.id, this.ui.frames);
+            var _pose = drawn ? Math.floor(((_a$runClock = a.runClock) != null ? _a$runClock : 0) * 8) : soulAllyFrame(a.phase, _running, (_a$runClock2 = a.runClock) != null ? _a$runClock2 : 0, progress, effects ? a.clock : 0);
+            var _frame = (drawn ? 300 : 100) + _pose,
+              _key = drawn ? "soul-run/" + ((_a$id5 = a.id) != null ? _a$id5 : -1) + "/" + _pose : soul + '/' + _pose;
+            if (a.frame !== _frame && this.ui.paint(node, _key)) {
+              var _t = node.getComponent(UITransform),
+                width = drawn ? node.getComponent(Sprite).spriteFrame.rect.width : 448;
+              _t.setContentSize(_t.height * width / 192, _t.height);
+              _t.setAnchorPoint((width / 2 - 32) / width, 6 / 192);
+              a.frame = _frame;
             }
             var sprite = node.getComponent(Sprite);
             if (sprite) sprite.enabled = true;
@@ -8786,8 +8807,10 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             if (a.rest) {
               var _a$rest3 = a.rest,
                 _position = _a$rest3.position,
-                _scale = _a$rest3.scale;
-              node.setPosition(a.id === null || a.world ? _position.x : 0, a.id === null || a.world ? _position.y : 0, _position.z);
+                _scale = _a$rest3.scale,
+                unit = node.getComponent(UITransform).height / 192;
+              var offset = _running && !drawn && !enemy ? runPoseOffset(a.id, _pose) : [0, 0];
+              node.setPosition((a.id === null || a.world ? _position.x : 0) + offset[0] * unit * direction, (a.id === null || a.world ? _position.y : 0) + offset[1] * unit, _position.z);
               node.setScale(_scale);
               node.angle = 0;
             }
@@ -8797,8 +8820,8 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
           var ready = a.phase === 'ready',
             strike = a.phase === 'strike' || a.phase === 'hold',
             recover = a.phase === 'recover';
-          var run = (_a$runWeight2 = a.runWeight) != null ? _a$runWeight2 : 0,
-            step = ((_a$runClock2 = a.runClock) != null ? _a$runClock2 : 0) * Math.PI * 2,
+          var run = (_a$runWeight3 = a.runWeight) != null ? _a$runWeight3 : 0,
+            step = ((_a$runClock3 = a.runClock) != null ? _a$runClock3 : 0) * Math.PI * 2,
             running = !!a.moving && a.phase === 'idle';
           var release = ready ? Math.max(0, (progress - .65) / .35) : 0;
           // Four reviewed poses: rest, stride, anticipation, extended contact. Recovery settles the contact pose before returning to rest.
@@ -8815,7 +8838,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             return (_this$ui$frames2 = _this.ui.frames) == null ? void 0 : _this$ui$frames2.has('warrior-run/' + a.id + '/' + i);
           }).every(Boolean)) this.warriorRunsAvailable.add(a.id);
           var drawnRun = running && (a.id === null ? this.captainRunAvailable : this.warriorRunsAvailable.has(a.id));
-          var frame = drawnRun ? 16 + Math.floor(((_a$runClock3 = a.runClock) != null ? _a$runClock3 : 0) * (a.id === null ? 8 : 6)) : running ? 1 : ready ? 2 : strike || recover && !(a.id === null && progress >= .65) ? 3 : 0;
+          var frame = drawnRun ? 16 + Math.floor(((_a$runClock4 = a.runClock) != null ? _a$runClock4 : 0) * (a.id === null ? 8 : 6)) : running ? 1 : ready ? 2 : strike || recover && !(a.id === null && progress >= .65) ? 3 : 0;
           // Complete drawn sprint poses carry torso, arms, blade, cape and feet together.
           // Never cut or rotate their limbs; a missing sheet retains the existing stride.
           this.show(node, a, frame);
@@ -8852,7 +8875,7 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
           this.effects = effects;
           var elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
           for (var _iterator8 = _createForOfIteratorHelperLoose(this.actors), _step8; !(_step8 = _iterator8()).done;) {
-            var _a$hitRemaining, _a$runWeight3, _a$runClock4, _WARRIOR_RUN_CADENCE$;
+            var _a$hitRemaining, _a$runWeight4, _a$runStillSeconds2, _a$runClock5;
             var _step8$value = _step8.value,
               _node3 = _step8$value[0],
               a = _step8$value[1];
@@ -8868,9 +8891,10 @@ System.register("chunks:///_virtual/CombatMotion.ts", ['./rollupPluginModLoBabel
             a.hitRemaining = Math.max(0, ((_a$hitRemaining = a.hitRemaining) != null ? _a$hitRemaining : 0) - elapsed);
             if (a.queuedReady !== undefined) a.queuedReady = Math.max(.01, a.queuedReady - elapsed);
             var target = a.moving ? 1 : 0;
-            a.runWeight = target + (((_a$runWeight3 = a.runWeight) != null ? _a$runWeight3 : 0) - target) * Math.exp(-elapsed / (target ? .12 : .09));
+            a.runWeight = target + (((_a$runWeight4 = a.runWeight) != null ? _a$runWeight4 : 0) - target) * Math.exp(-elapsed / (target ? .12 : .09));
             if (a.runWeight < .001) a.runWeight = 0;
-            a.runClock = (((_a$runClock4 = a.runClock) != null ? _a$runClock4 : 0) + elapsed * (a.id === null && this.captainRunAvailable ? 2.2 : a.id !== null && this.warriorRunsAvailable.has(a.id) ? (_WARRIOR_RUN_CADENCE$ = WARRIOR_RUN_CADENCE[a.id]) != null ? _WARRIOR_RUN_CADENCE$ : 1.8 : 1.8) * (.45 + .55 * a.runWeight)) % 1;
+            a.runStillSeconds = a.moving ? 0 : ((_a$runStillSeconds2 = a.runStillSeconds) != null ? _a$runStillSeconds2 : 1) + elapsed;
+            a.runClock = runClockAfter((_a$runClock5 = a.runClock) != null ? _a$runClock5 : 0, elapsed, !!a.moving && a.phase === 'idle', a.id);
             if (a.phase === 'ready' && !a.moving) a.remaining = Math.max(0, a.remaining - elapsed);else if (a.phase === 'strike' || a.phase === 'hold' || a.phase === 'recover') {
               a.remaining -= elapsed;
               if (a.remaining <= 0 && a.phase === 'strike') {
@@ -9933,6 +9957,7 @@ System.register("chunks:///_virtual/DivineBeasts.ts", ['./rollupPluginModLoBabel
     }],
     execute: function () {
       exports({
+        applyBeastTrainingText: applyBeastTrainingText,
         applyDivineBeastText: applyDivineBeastText,
         divineBeastPose: divineBeastPose
       });
@@ -10209,6 +10234,43 @@ System.register("chunks:///_virtual/DivineBeasts.ts", ['./rollupPluginModLoBabel
           'action.petTotal': 'Total beast levels',
           'reward.type.pets': 'Divine beast levels'
         });
+      }
+
+      /** Training-only presentation; persisted tile IDs and rewards remain unchanged. */
+      function applyBeastTrainingText(t) {
+        var _loop2 = function _loop2() {
+          var locale = _arr2[_i4];
+          var table = t[locale];
+          // Card IDs stay 0..7: only their presentation changes from parts to beast seals.
+          DIVINE_BEASTS.slice(0, 8).forEach(function (beast, id) {
+            table['extra.part.' + id] = beast[locale];
+          });
+          Object.assign(table, locale === 'ko' ? {
+            'extra.puzzleInfo': '카드 2장을 뒤집어 같은 신수 패를 찾으세요.\n첫 카드를 열 때 시도 1회를 사용합니다.',
+            'extra.puzzleComplete': '수련 완료! 8쌍을 모두 찾았습니다.\n장비 조각 +5 · 내일 다시 수련하세요.',
+            'extra.puzzleCurrency': '수련 시도',
+            'ui.help.attempts': '신수 수련 시도\n하루 16회. 첫 카드를 열 때 1회를 사용하고 두 번째 카드는 추가 차감하지 않습니다.',
+            'extra.puzzleHelpIntro': '신수 패의 위치를 기억해 동행 신수를 성장시키는\n일일 짝맞추기 수련입니다. 전장 8부터 열립니다.',
+            'learn.maintenance.0': '신수 수련은 같은 신수 패 두 장을 찾는 수련입니다.\n16장 카드에서 8쌍을 완성합니다.',
+            'learn.maintenance.1': '닫힌 카드 1장 → 두 번째 카드 선택.\n같은 신수 패면 한 쌍이 완료됩니다.\n패의 그림과 관계없이 위에 표시된 신수가 성장합니다.'
+          } : {
+            'extra.puzzleInfo': 'Match two identical beast seals.\nFirst flip uses one attempt.',
+            'extra.puzzleComplete': 'All 8 pairs complete!\nEquipment shards +5 · Train tomorrow.',
+            'extra.puzzleCurrency': 'training attempts',
+            'ui.help.attempts': 'Beast training attempts\n16 per day. The first flip uses one attempt; the second costs no extra attempt.',
+            'extra.puzzleHelpIntro': 'Remember beast seals to train your companion\nin this daily matching game. Unlocks at battle 8.',
+            'learn.maintenance.0': 'Beast Training is a matching exercise.\nFind eight identical pairs among 16 cards.',
+            'learn.maintenance.1': 'Choose one card, then a second.\nIdentical beast seals complete a pair.\nThe named beast grows, regardless of the seal.',
+            'learn.maintenance.3': 'Each match: target beast +1 level.\nAll eight pairs give five equipment shards.\nCards, attempts, growth, and claims are saved.'
+          });
+          for (var _i5 = 0, _Object$keys3 = Object.keys(table); _i5 < _Object$keys3.length; _i5++) {
+            var key = _Object$keys3[_i5];
+            if (key.startsWith('extra.puzzle') || key.startsWith('learn.maintenance.')) table[key] = table[key].replace(/수련 패/g, '신수 패').replace(/training tiles/g, 'beast seals');
+          }
+        };
+        for (var _i4 = 0, _arr2 = ['ko', 'en']; _i4 < _arr2.length; _i4++) {
+          _loop2();
+        }
       }
       cclegacy._RF.pop();
     }
@@ -14362,18 +14424,2600 @@ System.register("chunks:///_virtual/EntryUI.ts", ['./rollupPluginModLoBabelHelpe
   };
 });
 
-System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI.ts', './PopupIllustrationUI.ts', './UITheme.ts'], function (exports) {
-  var cclegacy, UITransform, Mask, EQUIPMENT_STYLE, equipmentStats, equipmentHelp, EQUIPMENT_ICONS, popupPanel, UI;
+System.register("chunks:///_virtual/EquipmentArt.ts", ['cc'], function (exports) {
+  var cclegacy;
+  return {
+    setters: [function (module) {
+      cclegacy = module.cclegacy;
+    }],
+    execute: function () {
+      cclegacy._RF.push({}, "3b504VE0/1fiaE/VePE2CUx", "EquipmentArt", undefined);
+      /** Chrome ChatGPT originals; 200 reviewed frames in five shared atlases. */
+      var EQUIPMENT_ART = exports('EQUIPMENT_ART', {
+        "ui/military/gear/0": ["ui/three-kingdoms/gear-0", 2, 2, 96, 96],
+        "ui/military/gear/1": ["ui/three-kingdoms/gear-0", 102, 2, 96, 96],
+        "ui/military/gear/2": ["ui/three-kingdoms/gear-0", 202, 2, 96, 96],
+        "ui/military/gear/3": ["ui/three-kingdoms/gear-0", 302, 2, 96, 96],
+        "ui/military/gear/4": ["ui/three-kingdoms/gear-0", 402, 2, 96, 96],
+        "ui/military/gear/5": ["ui/three-kingdoms/gear-0", 502, 2, 96, 96],
+        "ui/military/gear/6": ["ui/three-kingdoms/gear-0", 602, 2, 96, 96],
+        "ui/military/gear/7": ["ui/three-kingdoms/gear-0", 702, 2, 96, 96],
+        "ui/military/gear/8": ["ui/three-kingdoms/gear-0", 2, 102, 96, 96],
+        "ui/military/gear/9": ["ui/three-kingdoms/gear-0", 102, 102, 96, 96],
+        "ui/military/gear/10": ["ui/three-kingdoms/gear-0", 202, 102, 96, 96],
+        "ui/military/gear/11": ["ui/three-kingdoms/gear-0", 302, 102, 96, 96],
+        "ui/military/gear/12": ["ui/three-kingdoms/gear-0", 402, 102, 96, 96],
+        "ui/military/gear/13": ["ui/three-kingdoms/gear-0", 502, 102, 96, 96],
+        "ui/military/gear/14": ["ui/three-kingdoms/gear-0", 602, 102, 96, 96],
+        "ui/military/gear/15": ["ui/three-kingdoms/gear-0", 702, 102, 96, 96],
+        "ui/military/gear/16": ["ui/three-kingdoms/gear-0", 2, 202, 96, 96],
+        "ui/military/gear/17": ["ui/three-kingdoms/gear-0", 102, 202, 96, 96],
+        "ui/military/gear/18": ["ui/three-kingdoms/gear-0", 202, 202, 96, 96],
+        "ui/military/gear/19": ["ui/three-kingdoms/gear-0", 302, 202, 96, 96],
+        "ui/military/gear/20": ["ui/three-kingdoms/gear-0", 402, 202, 96, 96],
+        "ui/military/gear/21": ["ui/three-kingdoms/gear-0", 502, 202, 96, 96],
+        "ui/military/gear/22": ["ui/three-kingdoms/gear-0", 602, 202, 96, 96],
+        "ui/military/gear/23": ["ui/three-kingdoms/gear-0", 702, 202, 96, 96],
+        "ui/military/gear/24": ["ui/three-kingdoms/gear-0", 2, 302, 96, 96],
+        "ui/military/gear/25": ["ui/three-kingdoms/gear-0", 102, 302, 96, 96],
+        "ui/military/gear/26": ["ui/three-kingdoms/gear-0", 202, 302, 96, 96],
+        "ui/military/gear/27": ["ui/three-kingdoms/gear-0", 302, 302, 96, 96],
+        "ui/military/gear/28": ["ui/three-kingdoms/gear-0", 402, 302, 96, 96],
+        "ui/military/gear/29": ["ui/three-kingdoms/gear-0", 502, 302, 96, 96],
+        "ui/military/gear/30": ["ui/three-kingdoms/gear-0", 602, 302, 96, 96],
+        "ui/military/gear/31": ["ui/three-kingdoms/gear-0", 702, 302, 96, 96],
+        "ui/military/gear/32": ["ui/three-kingdoms/gear-0", 2, 402, 96, 96],
+        "ui/military/gear/33": ["ui/three-kingdoms/gear-0", 102, 402, 96, 96],
+        "ui/military/gear/34": ["ui/three-kingdoms/gear-0", 202, 402, 96, 96],
+        "ui/military/gear/35": ["ui/three-kingdoms/gear-0", 302, 402, 96, 96],
+        "ui/military/gear/36": ["ui/three-kingdoms/gear-0", 402, 402, 96, 96],
+        "ui/military/gear/37": ["ui/three-kingdoms/gear-0", 502, 402, 96, 96],
+        "ui/military/gear/38": ["ui/three-kingdoms/gear-0", 602, 402, 96, 96],
+        "ui/military/gear/39": ["ui/three-kingdoms/gear-0", 702, 402, 96, 96],
+        "ui/military/gear/40": ["ui/three-kingdoms/gear-1", 2, 2, 96, 96],
+        "ui/military/gear/41": ["ui/three-kingdoms/gear-1", 102, 2, 96, 96],
+        "ui/military/gear/42": ["ui/three-kingdoms/gear-1", 202, 2, 96, 96],
+        "ui/military/gear/43": ["ui/three-kingdoms/gear-1", 302, 2, 96, 96],
+        "ui/military/gear/44": ["ui/three-kingdoms/gear-1", 402, 2, 96, 96],
+        "ui/military/gear/45": ["ui/three-kingdoms/gear-1", 502, 2, 96, 96],
+        "ui/military/gear/46": ["ui/three-kingdoms/gear-1", 602, 2, 96, 96],
+        "ui/military/gear/47": ["ui/three-kingdoms/gear-1", 702, 2, 96, 96],
+        "ui/military/gear/48": ["ui/three-kingdoms/gear-1", 2, 102, 96, 96],
+        "ui/military/gear/49": ["ui/three-kingdoms/gear-1", 102, 102, 96, 96],
+        "ui/military/gear/50": ["ui/three-kingdoms/gear-1", 202, 102, 96, 96],
+        "ui/military/gear/51": ["ui/three-kingdoms/gear-1", 302, 102, 96, 96],
+        "ui/military/gear/52": ["ui/three-kingdoms/gear-1", 402, 102, 96, 96],
+        "ui/military/gear/53": ["ui/three-kingdoms/gear-1", 502, 102, 96, 96],
+        "ui/military/gear/54": ["ui/three-kingdoms/gear-1", 602, 102, 96, 96],
+        "ui/military/gear/55": ["ui/three-kingdoms/gear-1", 702, 102, 96, 96],
+        "ui/military/gear/56": ["ui/three-kingdoms/gear-1", 2, 202, 96, 96],
+        "ui/military/gear/57": ["ui/three-kingdoms/gear-1", 102, 202, 96, 96],
+        "ui/military/gear/58": ["ui/three-kingdoms/gear-1", 202, 202, 96, 96],
+        "ui/military/gear/59": ["ui/three-kingdoms/gear-1", 302, 202, 96, 96],
+        "ui/military/gear/60": ["ui/three-kingdoms/gear-1", 402, 202, 96, 96],
+        "ui/military/gear/61": ["ui/three-kingdoms/gear-1", 502, 202, 96, 96],
+        "ui/military/gear/62": ["ui/three-kingdoms/gear-1", 602, 202, 96, 96],
+        "ui/military/gear/63": ["ui/three-kingdoms/gear-1", 702, 202, 96, 96],
+        "ui/military/gear/64": ["ui/three-kingdoms/gear-1", 2, 302, 96, 96],
+        "ui/military/gear/65": ["ui/three-kingdoms/gear-1", 102, 302, 96, 96],
+        "ui/military/gear/66": ["ui/three-kingdoms/gear-1", 202, 302, 96, 96],
+        "ui/military/gear/67": ["ui/three-kingdoms/gear-1", 302, 302, 96, 96],
+        "ui/military/gear/68": ["ui/three-kingdoms/gear-1", 402, 302, 96, 96],
+        "ui/military/gear/69": ["ui/three-kingdoms/gear-1", 502, 302, 96, 96],
+        "ui/military/gear/70": ["ui/three-kingdoms/gear-1", 602, 302, 96, 96],
+        "ui/military/gear/71": ["ui/three-kingdoms/gear-1", 702, 302, 96, 96],
+        "ui/military/gear/72": ["ui/three-kingdoms/gear-1", 2, 402, 96, 96],
+        "ui/military/gear/73": ["ui/three-kingdoms/gear-1", 102, 402, 96, 96],
+        "ui/military/gear/74": ["ui/three-kingdoms/gear-1", 202, 402, 96, 96],
+        "ui/military/gear/75": ["ui/three-kingdoms/gear-1", 302, 402, 96, 96],
+        "ui/military/gear/76": ["ui/three-kingdoms/gear-1", 402, 402, 96, 96],
+        "ui/military/gear/77": ["ui/three-kingdoms/gear-1", 502, 402, 96, 96],
+        "ui/military/gear/78": ["ui/three-kingdoms/gear-1", 602, 402, 96, 96],
+        "ui/military/gear/79": ["ui/three-kingdoms/gear-1", 702, 402, 96, 96],
+        "ui/military/gear/80": ["ui/three-kingdoms/gear-2", 2, 2, 96, 96],
+        "ui/military/gear/81": ["ui/three-kingdoms/gear-2", 102, 2, 96, 96],
+        "ui/military/gear/82": ["ui/three-kingdoms/gear-2", 202, 2, 96, 96],
+        "ui/military/gear/83": ["ui/three-kingdoms/gear-2", 302, 2, 96, 96],
+        "ui/military/gear/84": ["ui/three-kingdoms/gear-2", 402, 2, 96, 96],
+        "ui/military/gear/85": ["ui/three-kingdoms/gear-2", 502, 2, 96, 96],
+        "ui/military/gear/86": ["ui/three-kingdoms/gear-2", 602, 2, 96, 96],
+        "ui/military/gear/87": ["ui/three-kingdoms/gear-2", 702, 2, 96, 96],
+        "ui/military/gear/88": ["ui/three-kingdoms/gear-2", 2, 102, 96, 96],
+        "ui/military/gear/89": ["ui/three-kingdoms/gear-2", 102, 102, 96, 96],
+        "ui/military/gear/90": ["ui/three-kingdoms/gear-2", 202, 102, 96, 96],
+        "ui/military/gear/91": ["ui/three-kingdoms/gear-2", 302, 102, 96, 96],
+        "ui/military/gear/92": ["ui/three-kingdoms/gear-2", 402, 102, 96, 96],
+        "ui/military/gear/93": ["ui/three-kingdoms/gear-2", 502, 102, 96, 96],
+        "ui/military/gear/94": ["ui/three-kingdoms/gear-2", 602, 102, 96, 96],
+        "ui/military/gear/95": ["ui/three-kingdoms/gear-2", 702, 102, 96, 96],
+        "ui/military/gear/96": ["ui/three-kingdoms/gear-2", 2, 202, 96, 96],
+        "ui/military/gear/97": ["ui/three-kingdoms/gear-2", 102, 202, 96, 96],
+        "ui/military/gear/98": ["ui/three-kingdoms/gear-2", 202, 202, 96, 96],
+        "ui/military/gear/99": ["ui/three-kingdoms/gear-2", 302, 202, 96, 96],
+        "ui/military/gear/100": ["ui/three-kingdoms/gear-2", 402, 202, 96, 96],
+        "ui/military/gear/101": ["ui/three-kingdoms/gear-2", 502, 202, 96, 96],
+        "ui/military/gear/102": ["ui/three-kingdoms/gear-2", 602, 202, 96, 96],
+        "ui/military/gear/103": ["ui/three-kingdoms/gear-2", 702, 202, 96, 96],
+        "ui/military/gear/104": ["ui/three-kingdoms/gear-2", 2, 302, 96, 96],
+        "ui/military/gear/105": ["ui/three-kingdoms/gear-2", 102, 302, 96, 96],
+        "ui/military/gear/106": ["ui/three-kingdoms/gear-2", 202, 302, 96, 96],
+        "ui/military/gear/107": ["ui/three-kingdoms/gear-2", 302, 302, 96, 96],
+        "ui/military/gear/108": ["ui/three-kingdoms/gear-2", 402, 302, 96, 96],
+        "ui/military/gear/109": ["ui/three-kingdoms/gear-2", 502, 302, 96, 96],
+        "ui/military/gear/110": ["ui/three-kingdoms/gear-2", 602, 302, 96, 96],
+        "ui/military/gear/111": ["ui/three-kingdoms/gear-2", 702, 302, 96, 96],
+        "ui/military/gear/112": ["ui/three-kingdoms/gear-2", 2, 402, 96, 96],
+        "ui/military/gear/113": ["ui/three-kingdoms/gear-2", 102, 402, 96, 96],
+        "ui/military/gear/114": ["ui/three-kingdoms/gear-2", 202, 402, 96, 96],
+        "ui/military/gear/115": ["ui/three-kingdoms/gear-2", 302, 402, 96, 96],
+        "ui/military/gear/116": ["ui/three-kingdoms/gear-2", 402, 402, 96, 96],
+        "ui/military/gear/117": ["ui/three-kingdoms/gear-2", 502, 402, 96, 96],
+        "ui/military/gear/118": ["ui/three-kingdoms/gear-2", 602, 402, 96, 96],
+        "ui/military/gear/119": ["ui/three-kingdoms/gear-2", 702, 402, 96, 96],
+        "ui/military/gear/120": ["ui/three-kingdoms/gear-3", 2, 2, 96, 96],
+        "ui/military/gear/121": ["ui/three-kingdoms/gear-3", 102, 2, 96, 96],
+        "ui/military/gear/122": ["ui/three-kingdoms/gear-3", 202, 2, 96, 96],
+        "ui/military/gear/123": ["ui/three-kingdoms/gear-3", 302, 2, 96, 96],
+        "ui/military/gear/124": ["ui/three-kingdoms/gear-3", 402, 2, 96, 96],
+        "ui/military/gear/125": ["ui/three-kingdoms/gear-3", 502, 2, 96, 96],
+        "ui/military/gear/126": ["ui/three-kingdoms/gear-3", 602, 2, 96, 96],
+        "ui/military/gear/127": ["ui/three-kingdoms/gear-3", 702, 2, 96, 96],
+        "ui/military/gear/128": ["ui/three-kingdoms/gear-3", 2, 102, 96, 96],
+        "ui/military/gear/129": ["ui/three-kingdoms/gear-3", 102, 102, 96, 96],
+        "ui/military/gear/130": ["ui/three-kingdoms/gear-3", 202, 102, 96, 96],
+        "ui/military/gear/131": ["ui/three-kingdoms/gear-3", 302, 102, 96, 96],
+        "ui/military/gear/132": ["ui/three-kingdoms/gear-3", 402, 102, 96, 96],
+        "ui/military/gear/133": ["ui/three-kingdoms/gear-3", 502, 102, 96, 96],
+        "ui/military/gear/134": ["ui/three-kingdoms/gear-3", 602, 102, 96, 96],
+        "ui/military/gear/135": ["ui/three-kingdoms/gear-3", 702, 102, 96, 96],
+        "ui/military/gear/136": ["ui/three-kingdoms/gear-3", 2, 202, 96, 96],
+        "ui/military/gear/137": ["ui/three-kingdoms/gear-3", 102, 202, 96, 96],
+        "ui/military/gear/138": ["ui/three-kingdoms/gear-3", 202, 202, 96, 96],
+        "ui/military/gear/139": ["ui/three-kingdoms/gear-3", 302, 202, 96, 96],
+        "ui/military/gear/140": ["ui/three-kingdoms/gear-3", 402, 202, 96, 96],
+        "ui/military/gear/141": ["ui/three-kingdoms/gear-3", 502, 202, 96, 96],
+        "ui/military/gear/142": ["ui/three-kingdoms/gear-3", 602, 202, 96, 96],
+        "ui/military/gear/143": ["ui/three-kingdoms/gear-3", 702, 202, 96, 96],
+        "ui/military/gear/144": ["ui/three-kingdoms/gear-3", 2, 302, 96, 96],
+        "ui/military/gear/145": ["ui/three-kingdoms/gear-3", 102, 302, 96, 96],
+        "ui/military/gear/146": ["ui/three-kingdoms/gear-3", 202, 302, 96, 96],
+        "ui/military/gear/147": ["ui/three-kingdoms/gear-3", 302, 302, 96, 96],
+        "ui/military/gear/148": ["ui/three-kingdoms/gear-3", 402, 302, 96, 96],
+        "ui/military/gear/149": ["ui/three-kingdoms/gear-3", 502, 302, 96, 96],
+        "ui/military/gear/150": ["ui/three-kingdoms/gear-3", 602, 302, 96, 96],
+        "ui/military/gear/151": ["ui/three-kingdoms/gear-3", 702, 302, 96, 96],
+        "ui/military/gear/152": ["ui/three-kingdoms/gear-3", 2, 402, 96, 96],
+        "ui/military/gear/153": ["ui/three-kingdoms/gear-3", 102, 402, 96, 96],
+        "ui/military/gear/154": ["ui/three-kingdoms/gear-3", 202, 402, 96, 96],
+        "ui/military/gear/155": ["ui/three-kingdoms/gear-3", 302, 402, 96, 96],
+        "ui/military/gear/156": ["ui/three-kingdoms/gear-3", 402, 402, 96, 96],
+        "ui/military/gear/157": ["ui/three-kingdoms/gear-3", 502, 402, 96, 96],
+        "ui/military/gear/158": ["ui/three-kingdoms/gear-3", 602, 402, 96, 96],
+        "ui/military/gear/159": ["ui/three-kingdoms/gear-3", 702, 402, 96, 96],
+        "ui/military/gear/160": ["ui/three-kingdoms/gear-4", 2, 2, 96, 96],
+        "ui/military/gear/161": ["ui/three-kingdoms/gear-4", 102, 2, 96, 96],
+        "ui/military/gear/162": ["ui/three-kingdoms/gear-4", 202, 2, 96, 96],
+        "ui/military/gear/163": ["ui/three-kingdoms/gear-4", 302, 2, 96, 96],
+        "ui/military/gear/164": ["ui/three-kingdoms/gear-4", 402, 2, 96, 96],
+        "ui/military/gear/165": ["ui/three-kingdoms/gear-4", 502, 2, 96, 96],
+        "ui/military/gear/166": ["ui/three-kingdoms/gear-4", 602, 2, 96, 96],
+        "ui/military/gear/167": ["ui/three-kingdoms/gear-4", 702, 2, 96, 96],
+        "ui/military/gear/168": ["ui/three-kingdoms/gear-4", 2, 102, 96, 96],
+        "ui/military/gear/169": ["ui/three-kingdoms/gear-4", 102, 102, 96, 96],
+        "ui/military/gear/170": ["ui/three-kingdoms/gear-4", 202, 102, 96, 96],
+        "ui/military/gear/171": ["ui/three-kingdoms/gear-4", 302, 102, 96, 96],
+        "ui/military/gear/172": ["ui/three-kingdoms/gear-4", 402, 102, 96, 96],
+        "ui/military/gear/173": ["ui/three-kingdoms/gear-4", 502, 102, 96, 96],
+        "ui/military/gear/174": ["ui/three-kingdoms/gear-4", 602, 102, 96, 96],
+        "ui/military/gear/175": ["ui/three-kingdoms/gear-4", 702, 102, 96, 96],
+        "ui/military/gear/176": ["ui/three-kingdoms/gear-4", 2, 202, 96, 96],
+        "ui/military/gear/177": ["ui/three-kingdoms/gear-4", 102, 202, 96, 96],
+        "ui/military/gear/178": ["ui/three-kingdoms/gear-4", 202, 202, 96, 96],
+        "ui/military/gear/179": ["ui/three-kingdoms/gear-4", 302, 202, 96, 96],
+        "ui/military/gear/180": ["ui/three-kingdoms/gear-4", 402, 202, 96, 96],
+        "ui/military/gear/181": ["ui/three-kingdoms/gear-4", 502, 202, 96, 96],
+        "ui/military/gear/182": ["ui/three-kingdoms/gear-4", 602, 202, 96, 96],
+        "ui/military/gear/183": ["ui/three-kingdoms/gear-4", 702, 202, 96, 96],
+        "ui/military/gear/184": ["ui/three-kingdoms/gear-4", 2, 302, 96, 96],
+        "ui/military/gear/185": ["ui/three-kingdoms/gear-4", 102, 302, 96, 96],
+        "ui/military/gear/186": ["ui/three-kingdoms/gear-4", 202, 302, 96, 96],
+        "ui/military/gear/187": ["ui/three-kingdoms/gear-4", 302, 302, 96, 96],
+        "ui/military/gear/188": ["ui/three-kingdoms/gear-4", 402, 302, 96, 96],
+        "ui/military/gear/189": ["ui/three-kingdoms/gear-4", 502, 302, 96, 96],
+        "ui/military/gear/190": ["ui/three-kingdoms/gear-4", 602, 302, 96, 96],
+        "ui/military/gear/191": ["ui/three-kingdoms/gear-4", 702, 302, 96, 96],
+        "ui/military/gear/192": ["ui/three-kingdoms/gear-4", 2, 402, 96, 96],
+        "ui/military/gear/193": ["ui/three-kingdoms/gear-4", 102, 402, 96, 96],
+        "ui/military/gear/194": ["ui/three-kingdoms/gear-4", 202, 402, 96, 96],
+        "ui/military/gear/195": ["ui/three-kingdoms/gear-4", 302, 402, 96, 96],
+        "ui/military/gear/196": ["ui/three-kingdoms/gear-4", 402, 402, 96, 96],
+        "ui/military/gear/197": ["ui/three-kingdoms/gear-4", 502, 402, 96, 96],
+        "ui/military/gear/198": ["ui/three-kingdoms/gear-4", 602, 402, 96, 96],
+        "ui/military/gear/199": ["ui/three-kingdoms/gear-4", 702, 402, 96, 96]
+      });
+      var EQUIPMENT_BOUNDS = exports('EQUIPMENT_BOUNDS', {
+        "ui/military/gear/0": [0.3229166666666667, 0.0625, 0.6666666666666666, 0.9375],
+        "ui/military/gear/1": [0.2604166666666667, 0.0625, 0.7395833333333334, 0.9375],
+        "ui/military/gear/2": [0.2708333333333333, 0.0625, 0.7291666666666666, 0.9375],
+        "ui/military/gear/3": [0.23958333333333334, 0.0625, 0.7604166666666666, 0.9375],
+        "ui/military/gear/4": [0.23958333333333334, 0.0625, 0.7604166666666666, 0.9375],
+        "ui/military/gear/5": [0.25, 0.0625, 0.75, 0.9375],
+        "ui/military/gear/6": [0.3229166666666667, 0.0625, 0.6770833333333334, 0.9375],
+        "ui/military/gear/7": [0.22916666666666666, 0.0625, 0.7604166666666666, 0.9375],
+        "ui/military/gear/8": [0.20833333333333334, 0.0625, 0.78125, 0.9375],
+        "ui/military/gear/9": [0.1875, 0.0625, 0.8125, 0.9375],
+        "ui/military/gear/10": [0.25, 0.0625, 0.75, 0.9375],
+        "ui/military/gear/11": [0.19791666666666666, 0.0625, 0.7916666666666666, 0.9375],
+        "ui/military/gear/12": [0.15625, 0.0625, 0.8333333333333334, 0.9375],
+        "ui/military/gear/13": [0.19791666666666666, 0.0625, 0.8020833333333334, 0.9375],
+        "ui/military/gear/14": [0.16666666666666666, 0.0625, 0.8333333333333334, 0.9375],
+        "ui/military/gear/15": [0.17708333333333334, 0.0625, 0.8229166666666666, 0.9375],
+        "ui/military/gear/16": [0.3333333333333333, 0.0625, 0.65625, 0.9375],
+        "ui/military/gear/17": [0.2916666666666667, 0.0625, 0.6979166666666666, 0.9375],
+        "ui/military/gear/18": [0.3125, 0.0625, 0.6770833333333334, 0.9375],
+        "ui/military/gear/19": [0.16666666666666666, 0.0625, 0.8229166666666666, 0.9375],
+        "ui/military/gear/20": [0.2604166666666667, 0.0625, 0.7291666666666666, 0.9375],
+        "ui/military/gear/21": [0.2916666666666667, 0.0625, 0.6979166666666666, 0.9375],
+        "ui/military/gear/22": [0.15625, 0.0625, 0.84375, 0.9375],
+        "ui/military/gear/23": [0.3229166666666667, 0.0625, 0.6770833333333334, 0.9375],
+        "ui/military/gear/24": [0.1875, 0.0625, 0.8125, 0.9375],
+        "ui/military/gear/25": [0.22916666666666666, 0.0625, 0.7708333333333334, 0.9375],
+        "ui/military/gear/26": [0.16666666666666666, 0.0625, 0.8333333333333334, 0.9375],
+        "ui/military/gear/27": [0.19791666666666666, 0.0625, 0.7916666666666666, 0.9375],
+        "ui/military/gear/28": [0.23958333333333334, 0.0625, 0.7604166666666666, 0.9375],
+        "ui/military/gear/29": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/30": [0.17708333333333334, 0.0625, 0.8229166666666666, 0.9375],
+        "ui/military/gear/31": [0.20833333333333334, 0.0625, 0.78125, 0.9375],
+        "ui/military/gear/32": [0.14583333333333334, 0.0625, 0.8541666666666666, 0.9375],
+        "ui/military/gear/33": [0.17708333333333334, 0.0625, 0.8125, 0.9375],
+        "ui/military/gear/34": [0.15625, 0.0625, 0.84375, 0.9375],
+        "ui/military/gear/35": [0.0625, 0.09375, 0.9375, 0.90625],
+        "ui/military/gear/36": [0.16666666666666666, 0.0625, 0.8333333333333334, 0.9375],
+        "ui/military/gear/37": [0.19791666666666666, 0.0625, 0.7916666666666666, 0.9375],
+        "ui/military/gear/38": [0.25, 0.0625, 0.7395833333333334, 0.9375],
+        "ui/military/gear/39": [0.19791666666666666, 0.0625, 0.8020833333333334, 0.9375],
+        "ui/military/gear/40": [0.0625, 0.10416666666666667, 0.9375, 0.8854166666666666],
+        "ui/military/gear/41": [0.10416666666666667, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/42": [0.0625, 0.22916666666666666, 0.9375, 0.7708333333333334],
+        "ui/military/gear/43": [0.08333333333333333, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/44": [0.0625, 0.11458333333333333, 0.9375, 0.875],
+        "ui/military/gear/45": [0.08333333333333333, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/46": [0.0625, 0.17708333333333334, 0.9375, 0.8229166666666666],
+        "ui/military/gear/47": [0.0625, 0.11458333333333333, 0.9375, 0.8854166666666666],
+        "ui/military/gear/48": [0.0625, 0.07291666666666667, 0.9375, 0.9270833333333334],
+        "ui/military/gear/49": [0.0625, 0.07291666666666667, 0.9375, 0.9270833333333334],
+        "ui/military/gear/50": [0.0625, 0.16666666666666666, 0.9375, 0.8229166666666666],
+        "ui/military/gear/51": [0.0625, 0.08333333333333333, 0.9375, 0.90625],
+        "ui/military/gear/52": [0.0625, 0.15625, 0.9375, 0.8333333333333334],
+        "ui/military/gear/53": [0.0625, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/54": [0.0625, 0.16666666666666666, 0.9375, 0.8333333333333334],
+        "ui/military/gear/55": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/56": [0.0625, 0.08333333333333333, 0.9375, 0.90625],
+        "ui/military/gear/57": [0.0625, 0.08333333333333333, 0.9375, 0.9166666666666666],
+        "ui/military/gear/58": [0.07291666666666667, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/59": [0.0625, 0.10416666666666667, 0.9375, 0.8958333333333334],
+        "ui/military/gear/60": [0.0625, 0.07291666666666667, 0.9375, 0.9166666666666666],
+        "ui/military/gear/61": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/62": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/63": [0.0625, 0.09375, 0.9375, 0.90625],
+        "ui/military/gear/64": [0.11458333333333333, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/65": [0.14583333333333334, 0.0625, 0.8541666666666666, 0.9375],
+        "ui/military/gear/66": [0.08333333333333333, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/67": [0.08333333333333333, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/68": [0.0625, 0.11458333333333333, 0.9375, 0.875],
+        "ui/military/gear/69": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/70": [0.09375, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/71": [0.10416666666666667, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/72": [0.10416666666666667, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/73": [0.0625, 0.09375, 0.9375, 0.8958333333333334],
+        "ui/military/gear/74": [0.125, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/75": [0.14583333333333334, 0.07291666666666667, 0.84375, 0.9375],
+        "ui/military/gear/76": [0.09375, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/77": [0.10416666666666667, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/78": [0.125, 0.0625, 0.875, 0.9375],
+        "ui/military/gear/79": [0.07291666666666667, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/80": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/81": [0.16666666666666666, 0.0625, 0.8229166666666666, 0.9375],
+        "ui/military/gear/82": [0.0625, 0.125, 0.9375, 0.875],
+        "ui/military/gear/83": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/84": [0.0625, 0.07291666666666667, 0.9375, 0.9270833333333334],
+        "ui/military/gear/85": [0.0625, 0.07291666666666667, 0.9375, 0.9166666666666666],
+        "ui/military/gear/86": [0.08333333333333333, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/87": [0.10416666666666667, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/88": [0.125, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/89": [0.125, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/90": [0.0625, 0.08333333333333333, 0.9375, 0.9166666666666666],
+        "ui/military/gear/91": [0.11458333333333333, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/92": [0.11458333333333333, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/93": [0.0625, 0.125, 0.9375, 0.875],
+        "ui/military/gear/94": [0.07291666666666667, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/95": [0.11458333333333333, 0.0625, 0.875, 0.9375],
+        "ui/military/gear/96": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/97": [0.0625, 0.09375, 0.9375, 0.8958333333333334],
+        "ui/military/gear/98": [0.11458333333333333, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/99": [0.0625, 0.125, 0.9375, 0.875],
+        "ui/military/gear/100": [0.0625, 0.09375, 0.9375, 0.8958333333333334],
+        "ui/military/gear/101": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/102": [0.07291666666666667, 0.08333333333333333, 0.9375, 0.9166666666666666],
+        "ui/military/gear/103": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/104": [0.0625, 0.07291666666666667, 0.9375, 0.9270833333333334],
+        "ui/military/gear/105": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/106": [0.11458333333333333, 0.0625, 0.875, 0.9375],
+        "ui/military/gear/107": [0.07291666666666667, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/108": [0.0625, 0.08333333333333333, 0.9375, 0.9166666666666666],
+        "ui/military/gear/109": [0.0625, 0.11458333333333333, 0.9375, 0.8854166666666666],
+        "ui/military/gear/110": [0.0625, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/111": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/112": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/113": [0.0625, 0.07291666666666667, 0.9375, 0.9270833333333334],
+        "ui/military/gear/114": [0.125, 0.07291666666666667, 0.8645833333333334, 0.9375],
+        "ui/military/gear/115": [0.0625, 0.08333333333333333, 0.9375, 0.9166666666666666],
+        "ui/military/gear/116": [0.0625, 0.08333333333333333, 0.9375, 0.90625],
+        "ui/military/gear/117": [0.07291666666666667, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/118": [0.11458333333333333, 0.0625, 0.8854166666666666, 0.9375],
+        "ui/military/gear/119": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/120": [0.10416666666666667, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/121": [0.22916666666666666, 0.0625, 0.7708333333333334, 0.9375],
+        "ui/military/gear/122": [0.0625, 0.16666666666666666, 0.9375, 0.8229166666666666],
+        "ui/military/gear/123": [0.09375, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/124": [0.0625, 0.10416666666666667, 0.9375, 0.8958333333333334],
+        "ui/military/gear/125": [0.19791666666666666, 0.0625, 0.7916666666666666, 0.9375],
+        "ui/military/gear/126": [0.09375, 0.0625, 0.90625, 0.9375],
+        "ui/military/gear/127": [0.0625, 0.14583333333333334, 0.9375, 0.8541666666666666],
+        "ui/military/gear/128": [0.0625, 0.1875, 0.9375, 0.8020833333333334],
+        "ui/military/gear/129": [0.19791666666666666, 0.0625, 0.7916666666666666, 0.9375],
+        "ui/military/gear/130": [0.0625, 0.13541666666666666, 0.9375, 0.8541666666666666],
+        "ui/military/gear/131": [0.0625, 0.08333333333333333, 0.9375, 0.90625],
+        "ui/military/gear/132": [0.0625, 0.09375, 0.9375, 0.90625],
+        "ui/military/gear/133": [0.0625, 0.13541666666666666, 0.9375, 0.8645833333333334],
+        "ui/military/gear/134": [0.0625, 0.19791666666666666, 0.9375, 0.7916666666666666],
+        "ui/military/gear/135": [0.0625, 0.125, 0.9375, 0.8645833333333334],
+        "ui/military/gear/136": [0.0625, 0.17708333333333334, 0.9375, 0.8125],
+        "ui/military/gear/137": [0.0625, 0.11458333333333333, 0.9375, 0.8854166666666666],
+        "ui/military/gear/138": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/139": [0.0625, 0.11458333333333333, 0.9375, 0.8854166666666666],
+        "ui/military/gear/140": [0.2708333333333333, 0.0625, 0.7291666666666666, 0.9375],
+        "ui/military/gear/141": [0.0625, 0.2708333333333333, 0.9375, 0.7291666666666666],
+        "ui/military/gear/142": [0.0625, 0.20833333333333334, 0.9375, 0.7916666666666666],
+        "ui/military/gear/143": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/144": [0.0625, 0.07291666666666667, 0.9375, 0.9166666666666666],
+        "ui/military/gear/145": [0.0625, 0.07291666666666667, 0.9375, 0.9166666666666666],
+        "ui/military/gear/146": [0.0625, 0.22916666666666666, 0.9375, 0.7604166666666666],
+        "ui/military/gear/147": [0.0625, 0.13541666666666666, 0.9375, 0.8645833333333334],
+        "ui/military/gear/148": [0.0625, 0.07291666666666667, 0.9375, 0.9166666666666666],
+        "ui/military/gear/149": [0.0625, 0.25, 0.9375, 0.75],
+        "ui/military/gear/150": [0.08333333333333333, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/151": [0.0625, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/152": [0.0625, 0.13541666666666666, 0.9375, 0.8645833333333334],
+        "ui/military/gear/153": [0.0625, 0.0625, 0.9375, 0.9375],
+        "ui/military/gear/154": [0.0625, 0.125, 0.9375, 0.8645833333333334],
+        "ui/military/gear/155": [0.0625, 0.13541666666666666, 0.9375, 0.8541666666666666],
+        "ui/military/gear/156": [0.0625, 0.15625, 0.9375, 0.84375],
+        "ui/military/gear/157": [0.0625, 0.10416666666666667, 0.9375, 0.8854166666666666],
+        "ui/military/gear/158": [0.0625, 0.13541666666666666, 0.9375, 0.8541666666666666],
+        "ui/military/gear/159": [0.0625, 0.11458333333333333, 0.9375, 0.875],
+        "ui/military/gear/160": [0.0625, 0.14583333333333334, 0.9375, 0.8541666666666666],
+        "ui/military/gear/161": [0.0625, 0.08333333333333333, 0.9375, 0.90625],
+        "ui/military/gear/162": [0.0625, 0.14583333333333334, 0.9375, 0.8541666666666666],
+        "ui/military/gear/163": [0.14583333333333334, 0.0625, 0.84375, 0.9375],
+        "ui/military/gear/164": [0.0625, 0.16666666666666666, 0.9375, 0.8229166666666666],
+        "ui/military/gear/165": [0.0625, 0.13541666666666666, 0.9375, 0.8645833333333334],
+        "ui/military/gear/166": [0.07291666666666667, 0.0625, 0.9166666666666666, 0.9375],
+        "ui/military/gear/167": [0.0625, 0.0625, 0.9375, 0.9270833333333334],
+        "ui/military/gear/168": [0.0625, 0.17708333333333334, 0.9375, 0.8125],
+        "ui/military/gear/169": [0.0625, 0.1875, 0.9375, 0.8020833333333334],
+        "ui/military/gear/170": [0.0625, 0.1875, 0.9375, 0.8020833333333334],
+        "ui/military/gear/171": [0.0625, 0.10416666666666667, 0.9375, 0.8958333333333334],
+        "ui/military/gear/172": [0.0625, 0.13541666666666666, 0.9375, 0.8645833333333334],
+        "ui/military/gear/173": [0.0625, 0.16666666666666666, 0.9375, 0.8229166666666666],
+        "ui/military/gear/174": [0.0625, 0.08333333333333333, 0.9270833333333334, 0.90625],
+        "ui/military/gear/175": [0.0625, 0.125, 0.9375, 0.875],
+        "ui/military/gear/176": [0.17708333333333334, 0.0625, 0.8125, 0.9375],
+        "ui/military/gear/177": [0.23958333333333334, 0.0625, 0.7604166666666666, 0.9375],
+        "ui/military/gear/178": [0.125, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/179": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/180": [0.28125, 0.0625, 0.7083333333333334, 0.9375],
+        "ui/military/gear/181": [0.0625, 0.17708333333333334, 0.9375, 0.8229166666666666],
+        "ui/military/gear/182": [0.25, 0.0625, 0.75, 0.9375],
+        "ui/military/gear/183": [0.09375, 0.0625, 0.8958333333333334, 0.9375],
+        "ui/military/gear/184": [0.0625, 0.1875, 0.9375, 0.8020833333333334],
+        "ui/military/gear/185": [0.13541666666666666, 0.0625, 0.8645833333333334, 0.9375],
+        "ui/military/gear/186": [0.0625, 0.16666666666666666, 0.9375, 0.8333333333333334],
+        "ui/military/gear/187": [0.0625, 0.17708333333333334, 0.9375, 0.8229166666666666],
+        "ui/military/gear/188": [0.0625, 0.17708333333333334, 0.9375, 0.8229166666666666],
+        "ui/military/gear/189": [0.0625, 0.16666666666666666, 0.9375, 0.8333333333333334],
+        "ui/military/gear/190": [0.07291666666666667, 0.0625, 0.9270833333333334, 0.9375],
+        "ui/military/gear/191": [0.0625, 0.20833333333333334, 0.9375, 0.78125],
+        "ui/military/gear/192": [0.0625, 0.20833333333333334, 0.9375, 0.78125],
+        "ui/military/gear/193": [0.0625, 0.21875, 0.9375, 0.7708333333333334],
+        "ui/military/gear/194": [0.0625, 0.28125, 0.9375, 0.7083333333333334],
+        "ui/military/gear/195": [0.0625, 0.2604166666666667, 0.9375, 0.7291666666666666],
+        "ui/military/gear/196": [0.0625, 0.15625, 0.9375, 0.8333333333333334],
+        "ui/military/gear/197": [0.0625, 0.17708333333333334, 0.9375, 0.8229166666666666],
+        "ui/military/gear/198": [0.0625, 0.22916666666666666, 0.9375, 0.7604166666666666],
+        "ui/military/gear/199": [0.0625, 0.2708333333333333, 0.9375, 0.7291666666666666]
+      });
+      cclegacy._RF.pop();
+    }
+  };
+});
+
+System.register("chunks:///_virtual/EquipmentCatalog.ts", ['cc'], function (exports) {
+  var cclegacy;
+  return {
+    setters: [function (module) {
+      cclegacy = module.cclegacy;
+    }],
+    execute: function () {
+      exports({
+        equipmentDefinition: equipmentDefinition,
+        equipmentDescription: equipmentDescription,
+        equipmentIcon: equipmentIcon,
+        equipmentName: equipmentName,
+        equipmentOrigin: equipmentOrigin,
+        equipmentPreview: equipmentPreview,
+        equipmentPreviewName: equipmentPreviewName,
+        equipmentTier: equipmentTier
+      });
+      cclegacy._RF.push({}, "8d481bDqwFBJpEtJtyZfUA+", "EquipmentCatalog", undefined);
+      /** Presentation only: derives identity from immutable saved item level, never live stage or rarity. */
+      var GEAR_LEVELS = exports('GEAR_LEVELS', Array.from({
+        length: 40
+      }, function (_, i) {
+        return 1 + i * 12;
+      }));
+      var EQUIPMENT_CATALOG = exports('EQUIPMENT_CATALOG', [{
+        "id": "han-gear-0",
+        "slot": 0,
+        "tier": 0,
+        "minLevel": 1,
+        "ko": "철모",
+        "en": "Iron Spear",
+        "origin": "artifact",
+        "source": "spear",
+        "icon": "gear:0"
+      }, {
+        "id": "han-gear-1",
+        "slot": 0,
+        "tier": 1,
+        "minLevel": 13,
+        "ko": "죽절모",
+        "en": "Bamboo-shaft Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:1"
+      }, {
+        "id": "han-gear-2",
+        "slot": 0,
+        "tier": 2,
+        "minLevel": 25,
+        "ko": "단모",
+        "en": "Short Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:2"
+      }, {
+        "id": "han-gear-3",
+        "slot": 0,
+        "tier": 3,
+        "minLevel": 37,
+        "ko": "장모",
+        "en": "Long Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:3"
+      }, {
+        "id": "han-gear-4",
+        "slot": 0,
+        "tier": 4,
+        "minLevel": 49,
+        "ko": "광인모",
+        "en": "Broad Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:4"
+      }, {
+        "id": "han-gear-5",
+        "slot": 0,
+        "tier": 5,
+        "minLevel": 61,
+        "ko": "유엽모",
+        "en": "Willow Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:5"
+      }, {
+        "id": "han-gear-6",
+        "slot": 0,
+        "tier": 6,
+        "minLevel": 73,
+        "ko": "쌍날모",
+        "en": "Twin-edge Spear",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:6"
+      }, {
+        "id": "han-gear-7",
+        "slot": 0,
+        "tier": 7,
+        "minLevel": 85,
+        "ko": "삭창",
+        "en": "Cavalry Lance",
+        "origin": "reconstruction",
+        "source": "spear",
+        "icon": "gear:7"
+      }, {
+        "id": "han-gear-8",
+        "slot": 0,
+        "tier": 8,
+        "minLevel": 97,
+        "ko": "환두도",
+        "en": "Ring-pommel Dao",
+        "origin": "artifact",
+        "source": "dao",
+        "icon": "gear:8"
+      }, {
+        "id": "han-gear-9",
+        "slot": 0,
+        "tier": 9,
+        "minLevel": 109,
+        "ko": "단환도",
+        "en": "Short Ring Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:9"
+      }, {
+        "id": "han-gear-10",
+        "slot": 0,
+        "tier": 10,
+        "minLevel": 121,
+        "ko": "협신도",
+        "en": "Narrow Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:10"
+      }, {
+        "id": "han-gear-11",
+        "slot": 0,
+        "tier": 11,
+        "minLevel": 133,
+        "ko": "광신도",
+        "en": "Broad Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:11"
+      }, {
+        "id": "han-gear-12",
+        "slot": 0,
+        "tier": 12,
+        "minLevel": 145,
+        "ko": "장환도",
+        "en": "Long Ring Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:12"
+      }, {
+        "id": "han-gear-13",
+        "slot": 0,
+        "tier": 13,
+        "minLevel": 157,
+        "ko": "직배도",
+        "en": "Straight-back Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:13"
+      }, {
+        "id": "han-gear-14",
+        "slot": 0,
+        "tier": 14,
+        "minLevel": 169,
+        "ko": "철환도",
+        "en": "Iron-ring Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:14"
+      }, {
+        "id": "han-gear-15",
+        "slot": 0,
+        "tier": 15,
+        "minLevel": 181,
+        "ko": "은상감도",
+        "en": "Silver-inlay Dao",
+        "origin": "reconstruction",
+        "source": "dao",
+        "icon": "gear:15"
+      }, {
+        "id": "han-gear-16",
+        "slot": 0,
+        "tier": 16,
+        "minLevel": 193,
+        "ko": "철검",
+        "en": "Iron Jian",
+        "origin": "artifact",
+        "source": "jian",
+        "icon": "gear:16"
+      }, {
+        "id": "han-gear-17",
+        "slot": 0,
+        "tier": 17,
+        "minLevel": 205,
+        "ko": "단검",
+        "en": "Short Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:17"
+      }, {
+        "id": "han-gear-18",
+        "slot": 0,
+        "tier": 18,
+        "minLevel": 217,
+        "ko": "장검",
+        "en": "Long Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:18"
+      }, {
+        "id": "han-gear-19",
+        "slot": 0,
+        "tier": 19,
+        "minLevel": 229,
+        "ko": "검수 장검",
+        "en": "Tasseled Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:19"
+      }, {
+        "id": "han-gear-20",
+        "slot": 0,
+        "tier": 20,
+        "minLevel": 241,
+        "ko": "옥격검",
+        "en": "Jade-guard Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:20"
+      }, {
+        "id": "han-gear-21",
+        "slot": 0,
+        "tier": 21,
+        "minLevel": 253,
+        "ko": "옥수검",
+        "en": "Jade-pommel Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:21"
+      }, {
+        "id": "han-gear-22",
+        "slot": 0,
+        "tier": 22,
+        "minLevel": 265,
+        "ko": "칠초검",
+        "en": "Lacquer-sheath Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:22"
+      }, {
+        "id": "han-gear-23",
+        "slot": 0,
+        "tier": 23,
+        "minLevel": 277,
+        "ko": "금상감검",
+        "en": "Gold-inlay Jian",
+        "origin": "reconstruction",
+        "source": "jian",
+        "icon": "gear:23"
+      }, {
+        "id": "han-gear-24",
+        "slot": 0,
+        "tier": 24,
+        "minLevel": 289,
+        "ko": "철극",
+        "en": "Iron Ji",
+        "origin": "artifact",
+        "source": "ji",
+        "icon": "gear:24"
+      }, {
+        "id": "han-gear-25",
+        "slot": 0,
+        "tier": 25,
+        "minLevel": 301,
+        "ko": "단극",
+        "en": "Short Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:25"
+      }, {
+        "id": "han-gear-26",
+        "slot": 0,
+        "tier": 26,
+        "minLevel": 313,
+        "ko": "장극",
+        "en": "Long Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:26"
+      }, {
+        "id": "han-gear-27",
+        "slot": 0,
+        "tier": 27,
+        "minLevel": 325,
+        "ko": "광인극",
+        "en": "Broad Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:27"
+      }, {
+        "id": "han-gear-28",
+        "slot": 0,
+        "tier": 28,
+        "minLevel": 337,
+        "ko": "갈고리극",
+        "en": "Hooked Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:28"
+      }, {
+        "id": "han-gear-29",
+        "slot": 0,
+        "tier": 29,
+        "minLevel": 349,
+        "ko": "쌍지극",
+        "en": "Twin-branch Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:29"
+      }, {
+        "id": "han-gear-30",
+        "slot": 0,
+        "tier": 30,
+        "minLevel": 361,
+        "ko": "차형극",
+        "en": "Forked Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:30"
+      }, {
+        "id": "han-gear-31",
+        "slot": 0,
+        "tier": 31,
+        "minLevel": 373,
+        "ko": "위장극",
+        "en": "Guard Ji",
+        "origin": "reconstruction",
+        "source": "ji",
+        "icon": "gear:31"
+      }, {
+        "id": "han-gear-32",
+        "slot": 0,
+        "tier": 32,
+        "minLevel": 385,
+        "ko": "청룡언월도",
+        "en": "Green Dragon Blade",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:32"
+      }, {
+        "id": "han-gear-33",
+        "slot": 0,
+        "tier": 33,
+        "minLevel": 397,
+        "ko": "장팔사모",
+        "en": "Serpent Spear",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:33"
+      }, {
+        "id": "han-gear-34",
+        "slot": 0,
+        "tier": 34,
+        "minLevel": 409,
+        "ko": "방천화극",
+        "en": "Painted Halberd",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:34"
+      }, {
+        "id": "han-gear-35",
+        "slot": 0,
+        "tier": 35,
+        "minLevel": 421,
+        "ko": "쌍고검",
+        "en": "Paired Swords",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:35"
+      }, {
+        "id": "han-gear-36",
+        "slot": 0,
+        "tier": 36,
+        "minLevel": 433,
+        "ko": "칠성보도",
+        "en": "Seven-star Blade",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:36"
+      }, {
+        "id": "han-gear-37",
+        "slot": 0,
+        "tier": 37,
+        "minLevel": 445,
+        "ko": "청강검",
+        "en": "Qinggang Sword",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:37"
+      }, {
+        "id": "han-gear-38",
+        "slot": 0,
+        "tier": 38,
+        "minLevel": 457,
+        "ko": "의천검",
+        "en": "Yitian Sword",
+        "origin": "romance",
+        "source": "romance",
+        "icon": "gear:38"
+      }, {
+        "id": "han-gear-39",
+        "slot": 0,
+        "tier": 39,
+        "minLevel": 469,
+        "ko": "군웅 장병도",
+        "en": "Warlord Poleblade",
+        "origin": "reconstruction",
+        "source": "romance",
+        "icon": "gear:39"
+      }, {
+        "id": "han-gear-40",
+        "slot": 1,
+        "tier": 0,
+        "minLevel": 1,
+        "ko": "포건",
+        "en": "Cloth Headwrap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:40"
+      }, {
+        "id": "han-gear-41",
+        "slot": 1,
+        "tier": 1,
+        "minLevel": 13,
+        "ko": "갈건",
+        "en": "Hemp Headcloth",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:41"
+      }, {
+        "id": "han-gear-42",
+        "slot": 1,
+        "tier": 2,
+        "minLevel": 25,
+        "ko": "평두건",
+        "en": "Flat Headcloth",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:42"
+      }, {
+        "id": "han-gear-43",
+        "slot": 1,
+        "tier": 3,
+        "minLevel": 37,
+        "ko": "첨두건",
+        "en": "Pointed Headcloth",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:43"
+      }, {
+        "id": "han-gear-44",
+        "slot": 1,
+        "tier": 4,
+        "minLevel": 49,
+        "ko": "후결건",
+        "en": "Rear-knot Wrap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:44"
+      }, {
+        "id": "han-gear-45",
+        "slot": 1,
+        "tier": 5,
+        "minLevel": 61,
+        "ko": "장수건",
+        "en": "Long-tail Wrap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:45"
+      }, {
+        "id": "han-gear-46",
+        "slot": 1,
+        "tier": 6,
+        "minLevel": 73,
+        "ko": "교차건",
+        "en": "Cross-fold Wrap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:46"
+      }, {
+        "id": "han-gear-47",
+        "slot": 1,
+        "tier": 7,
+        "minLevel": 85,
+        "ko": "겹포건",
+        "en": "Layered Wrap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:47"
+      }, {
+        "id": "han-gear-48",
+        "slot": 1,
+        "tier": 8,
+        "minLevel": 97,
+        "ko": "가죽모",
+        "en": "Leather Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:48"
+      }, {
+        "id": "han-gear-49",
+        "slot": 1,
+        "tier": 9,
+        "minLevel": 109,
+        "ko": "단첨모",
+        "en": "Peaked Leather Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:49"
+      }, {
+        "id": "han-gear-50",
+        "slot": 1,
+        "tier": 10,
+        "minLevel": 121,
+        "ko": "접이모",
+        "en": "Folded Leather Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:50"
+      }, {
+        "id": "han-gear-51",
+        "slot": 1,
+        "tier": 11,
+        "minLevel": 133,
+        "ko": "끈가죽모",
+        "en": "Laced Leather Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:51"
+      }, {
+        "id": "han-gear-52",
+        "slot": 1,
+        "tier": 12,
+        "minLevel": 145,
+        "ko": "이마덮개모",
+        "en": "Browguard Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:52"
+      }, {
+        "id": "han-gear-53",
+        "slot": 1,
+        "tier": 13,
+        "minLevel": 157,
+        "ko": "귀덮개모",
+        "en": "Earflap Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:53"
+      }, {
+        "id": "han-gear-54",
+        "slot": 1,
+        "tier": 14,
+        "minLevel": 169,
+        "ko": "목덮개모",
+        "en": "Neckflap Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:54"
+      }, {
+        "id": "han-gear-55",
+        "slot": 1,
+        "tier": 15,
+        "minLevel": 181,
+        "ko": "징가죽모",
+        "en": "Studded Leather Cap",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:55"
+      }, {
+        "id": "han-gear-56",
+        "slot": 1,
+        "tier": 16,
+        "minLevel": 193,
+        "ko": "찰갑 투구",
+        "en": "Lamellar Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:56"
+      }, {
+        "id": "han-gear-57",
+        "slot": 1,
+        "tier": 17,
+        "minLevel": 205,
+        "ko": "원정 투구",
+        "en": "Round Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:57"
+      }, {
+        "id": "han-gear-58",
+        "slot": 1,
+        "tier": 18,
+        "minLevel": 217,
+        "ko": "첨정 투구",
+        "en": "Peaked Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:58"
+      }, {
+        "id": "han-gear-59",
+        "slot": 1,
+        "tier": 19,
+        "minLevel": 229,
+        "ko": "띠철 투구",
+        "en": "Banded Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:59"
+      }, {
+        "id": "han-gear-60",
+        "slot": 1,
+        "tier": 20,
+        "minLevel": 241,
+        "ko": "판엮음 투구",
+        "en": "Laced-plate Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:60"
+      }, {
+        "id": "han-gear-61",
+        "slot": 1,
+        "tier": 21,
+        "minLevel": 253,
+        "ko": "협철 투구",
+        "en": "Narrow-plate Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:61"
+      }, {
+        "id": "han-gear-62",
+        "slot": 1,
+        "tier": 22,
+        "minLevel": 265,
+        "ko": "광판 투구",
+        "en": "Broad-plate Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:62"
+      }, {
+        "id": "han-gear-63",
+        "slot": 1,
+        "tier": 23,
+        "minLevel": 277,
+        "ko": "겹테 투구",
+        "en": "Double-rim Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:63"
+      }, {
+        "id": "han-gear-64",
+        "slot": 1,
+        "tier": 24,
+        "minLevel": 289,
+        "ko": "목가림 철투구",
+        "en": "Neckguard Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:64"
+      }, {
+        "id": "han-gear-65",
+        "slot": 1,
+        "tier": 25,
+        "minLevel": 301,
+        "ko": "턱끈 철투구",
+        "en": "Chinstrap Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:65"
+      }, {
+        "id": "han-gear-66",
+        "slot": 1,
+        "tier": 26,
+        "minLevel": 313,
+        "ko": "볼가림 철투구",
+        "en": "Cheekguard Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:66"
+      }, {
+        "id": "han-gear-67",
+        "slot": 1,
+        "tier": 27,
+        "minLevel": 325,
+        "ko": "철편 드림투구",
+        "en": "Plate-skirt Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:67"
+      }, {
+        "id": "han-gear-68",
+        "slot": 1,
+        "tier": 28,
+        "minLevel": 337,
+        "ko": "후경 투구",
+        "en": "Rear-guard Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:68"
+      }, {
+        "id": "han-gear-69",
+        "slot": 1,
+        "tier": 29,
+        "minLevel": 349,
+        "ko": "측경 투구",
+        "en": "Side-guard Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:69"
+      }, {
+        "id": "han-gear-70",
+        "slot": 1,
+        "tier": 30,
+        "minLevel": 361,
+        "ko": "전액 투구",
+        "en": "Browplate Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:70"
+      }, {
+        "id": "han-gear-71",
+        "slot": 1,
+        "tier": 31,
+        "minLevel": 373,
+        "ko": "중장 투구",
+        "en": "Heavy Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:71"
+      }, {
+        "id": "han-gear-72",
+        "slot": 1,
+        "tier": 32,
+        "minLevel": 385,
+        "ko": "장수 철투구",
+        "en": "Command Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:72"
+      }, {
+        "id": "han-gear-73",
+        "slot": 1,
+        "tier": 33,
+        "minLevel": 397,
+        "ko": "동테 투구",
+        "en": "Bronze-rim Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:73"
+      }, {
+        "id": "han-gear-74",
+        "slot": 1,
+        "tier": 34,
+        "minLevel": 409,
+        "ko": "우식 투구",
+        "en": "Feather Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:74"
+      }, {
+        "id": "han-gear-75",
+        "slot": 1,
+        "tier": 35,
+        "minLevel": 421,
+        "ko": "영장 투구",
+        "en": "Officer Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:75"
+      }, {
+        "id": "han-gear-76",
+        "slot": 1,
+        "tier": 36,
+        "minLevel": 433,
+        "ko": "운문 투구",
+        "en": "Cloud-band Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:76"
+      }, {
+        "id": "han-gear-77",
+        "slot": 1,
+        "tier": 37,
+        "minLevel": 445,
+        "ko": "매듭 장수모",
+        "en": "Knotted Officer Cap",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:77"
+      }, {
+        "id": "han-gear-78",
+        "slot": 1,
+        "tier": 38,
+        "minLevel": 457,
+        "ko": "호위장 투구",
+        "en": "Guard Captain Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:78"
+      }, {
+        "id": "han-gear-79",
+        "slot": 1,
+        "tier": 39,
+        "minLevel": 469,
+        "ko": "대장 투구",
+        "en": "General Helm",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:79"
+      }, {
+        "id": "han-gear-80",
+        "slot": 2,
+        "tier": 0,
+        "minLevel": 1,
+        "ko": "포의",
+        "en": "Cloth Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:80"
+      }, {
+        "id": "han-gear-81",
+        "slot": 2,
+        "tier": 1,
+        "minLevel": 13,
+        "ko": "단의",
+        "en": "Short Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:81"
+      }, {
+        "id": "han-gear-82",
+        "slot": 2,
+        "tier": 2,
+        "minLevel": 25,
+        "ko": "장포",
+        "en": "Long Robe",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:82"
+      }, {
+        "id": "han-gear-83",
+        "slot": 2,
+        "tier": 3,
+        "minLevel": 37,
+        "ko": "좁은소매 포의",
+        "en": "Narrow-sleeve Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:83"
+      }, {
+        "id": "han-gear-84",
+        "slot": 2,
+        "tier": 4,
+        "minLevel": 49,
+        "ko": "덧깃 포의",
+        "en": "Double-collar Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:84"
+      }, {
+        "id": "han-gear-85",
+        "slot": 2,
+        "tier": 5,
+        "minLevel": 61,
+        "ko": "허리끈 포의",
+        "en": "Sashed Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:85"
+      }, {
+        "id": "han-gear-86",
+        "slot": 2,
+        "tier": 6,
+        "minLevel": 73,
+        "ko": "소매걷은 포의",
+        "en": "Rolled-sleeve Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:86"
+      }, {
+        "id": "han-gear-87",
+        "slot": 2,
+        "tier": 7,
+        "minLevel": 85,
+        "ko": "행군 포의",
+        "en": "Marching Tunic",
+        "origin": "reconstruction",
+        "source": "dress",
+        "icon": "gear:87"
+      }, {
+        "id": "han-gear-88",
+        "slot": 2,
+        "tier": 8,
+        "minLevel": 97,
+        "ko": "가죽 흉갑",
+        "en": "Leather Cuirass",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:88"
+      }, {
+        "id": "han-gear-89",
+        "slot": 2,
+        "tier": 9,
+        "minLevel": 109,
+        "ko": "흉대 가죽갑",
+        "en": "Strapped Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:89"
+      }, {
+        "id": "han-gear-90",
+        "slot": 2,
+        "tier": 10,
+        "minLevel": 121,
+        "ko": "겹가죽갑",
+        "en": "Layered Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:90"
+      }, {
+        "id": "han-gear-91",
+        "slot": 2,
+        "tier": 11,
+        "minLevel": 133,
+        "ko": "가죽 배갑",
+        "en": "Leather Backplate",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:91"
+      }, {
+        "id": "han-gear-92",
+        "slot": 2,
+        "tier": 12,
+        "minLevel": 145,
+        "ko": "징가죽갑",
+        "en": "Studded Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:92"
+      }, {
+        "id": "han-gear-93",
+        "slot": 2,
+        "tier": 13,
+        "minLevel": 157,
+        "ko": "어깨가죽갑",
+        "en": "Shoulder Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:93"
+      }, {
+        "id": "han-gear-94",
+        "slot": 2,
+        "tier": 14,
+        "minLevel": 169,
+        "ko": "치마가죽갑",
+        "en": "Skirted Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:94"
+      }, {
+        "id": "han-gear-95",
+        "slot": 2,
+        "tier": 15,
+        "minLevel": 181,
+        "ko": "끈엮음 가죽갑",
+        "en": "Laced Leather",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:95"
+      }, {
+        "id": "han-gear-96",
+        "slot": 2,
+        "tier": 16,
+        "minLevel": 193,
+        "ko": "칠찰갑",
+        "en": "Lacquered Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:96"
+      }, {
+        "id": "han-gear-97",
+        "slot": 2,
+        "tier": 17,
+        "minLevel": 205,
+        "ko": "단찰갑",
+        "en": "Short Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:97"
+      }, {
+        "id": "han-gear-98",
+        "slot": 2,
+        "tier": 18,
+        "minLevel": 217,
+        "ko": "장찰갑",
+        "en": "Long Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:98"
+      }, {
+        "id": "han-gear-99",
+        "slot": 2,
+        "tier": 19,
+        "minLevel": 229,
+        "ko": "어깨찰갑",
+        "en": "Shoulder Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:99"
+      }, {
+        "id": "han-gear-100",
+        "slot": 2,
+        "tier": 20,
+        "minLevel": 241,
+        "ko": "흉판찰갑",
+        "en": "Chestplate Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:100"
+      }, {
+        "id": "han-gear-101",
+        "slot": 2,
+        "tier": 21,
+        "minLevel": 253,
+        "ko": "띠엮음 찰갑",
+        "en": "Laced Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:101"
+      }, {
+        "id": "han-gear-102",
+        "slot": 2,
+        "tier": 22,
+        "minLevel": 265,
+        "ko": "겹단찰갑",
+        "en": "Layered Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:102"
+      }, {
+        "id": "han-gear-103",
+        "slot": 2,
+        "tier": 23,
+        "minLevel": 277,
+        "ko": "개방찰갑",
+        "en": "Open-front Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:103"
+      }, {
+        "id": "han-gear-104",
+        "slot": 2,
+        "tier": 24,
+        "minLevel": 289,
+        "ko": "철찰갑",
+        "en": "Iron Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:104"
+      }, {
+        "id": "han-gear-105",
+        "slot": 2,
+        "tier": 25,
+        "minLevel": 301,
+        "ko": "판철갑",
+        "en": "Broad-plate Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:105"
+      }, {
+        "id": "han-gear-106",
+        "slot": 2,
+        "tier": 26,
+        "minLevel": 313,
+        "ko": "세찰철갑",
+        "en": "Fine-plate Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:106"
+      }, {
+        "id": "han-gear-107",
+        "slot": 2,
+        "tier": 27,
+        "minLevel": 325,
+        "ko": "흉철갑",
+        "en": "Iron Breast Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:107"
+      }, {
+        "id": "han-gear-108",
+        "slot": 2,
+        "tier": 28,
+        "minLevel": 337,
+        "ko": "견철갑",
+        "en": "Shoulder Iron",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:108"
+      }, {
+        "id": "han-gear-109",
+        "slot": 2,
+        "tier": 29,
+        "minLevel": 349,
+        "ko": "수갑철갑",
+        "en": "Armguard Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:109"
+      }, {
+        "id": "han-gear-110",
+        "slot": 2,
+        "tier": 30,
+        "minLevel": 361,
+        "ko": "치마철갑",
+        "en": "Iron Skirt Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:110"
+      }, {
+        "id": "han-gear-111",
+        "slot": 2,
+        "tier": 31,
+        "minLevel": 373,
+        "ko": "중찰철갑",
+        "en": "Heavy Lamellar",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:111"
+      }, {
+        "id": "han-gear-112",
+        "slot": 2,
+        "tier": 32,
+        "minLevel": 385,
+        "ko": "장수 찰갑",
+        "en": "Command Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:112"
+      }, {
+        "id": "han-gear-113",
+        "slot": 2,
+        "tier": 33,
+        "minLevel": 397,
+        "ko": "호위 찰갑",
+        "en": "Guard Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:113"
+      }, {
+        "id": "han-gear-114",
+        "slot": 2,
+        "tier": 34,
+        "minLevel": 409,
+        "ko": "군위 찰갑",
+        "en": "Officer Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:114"
+      }, {
+        "id": "han-gear-115",
+        "slot": 2,
+        "tier": 35,
+        "minLevel": 421,
+        "ko": "장포 찰갑",
+        "en": "Robe Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:115"
+      }, {
+        "id": "han-gear-116",
+        "slot": 2,
+        "tier": 36,
+        "minLevel": 433,
+        "ko": "반망토 찰갑",
+        "en": "Half-mantle Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:116"
+      }, {
+        "id": "han-gear-117",
+        "slot": 2,
+        "tier": 37,
+        "minLevel": 445,
+        "ko": "쌍견 찰갑",
+        "en": "Twin-shoulder Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:117"
+      }, {
+        "id": "han-gear-118",
+        "slot": 2,
+        "tier": 38,
+        "minLevel": 457,
+        "ko": "운문 찰갑",
+        "en": "Cloud-trim Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:118"
+      }, {
+        "id": "han-gear-119",
+        "slot": 2,
+        "tier": 39,
+        "minLevel": 469,
+        "ko": "대장 찰갑",
+        "en": "General Armor",
+        "origin": "reconstruction",
+        "source": "armor",
+        "icon": "gear:119"
+      }, {
+        "id": "han-gear-120",
+        "slot": 3,
+        "tier": 0,
+        "minLevel": 1,
+        "ko": "군령 목간",
+        "en": "Dispatch Slips",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:120"
+      }, {
+        "id": "han-gear-121",
+        "slot": 3,
+        "tier": 1,
+        "minLevel": 13,
+        "ko": "척독",
+        "en": "Writing Tablet",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:121"
+      }, {
+        "id": "han-gear-122",
+        "slot": 3,
+        "tier": 2,
+        "minLevel": 25,
+        "ko": "쌍독",
+        "en": "Twin Tablets",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:122"
+      }, {
+        "id": "han-gear-123",
+        "slot": 3,
+        "tier": 3,
+        "minLevel": 37,
+        "ko": "군보 목간",
+        "en": "Scout Dispatch",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:123"
+      }, {
+        "id": "han-gear-124",
+        "slot": 3,
+        "tier": 4,
+        "minLevel": 49,
+        "ko": "보급 목간",
+        "en": "Supply Slips",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:124"
+      }, {
+        "id": "han-gear-125",
+        "slot": 3,
+        "tier": 5,
+        "minLevel": 61,
+        "ko": "봉함 목독",
+        "en": "Sealed Tablet",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:125"
+      }, {
+        "id": "han-gear-126",
+        "slot": 3,
+        "tier": 6,
+        "minLevel": 73,
+        "ko": "행군 목간",
+        "en": "Marching Slips",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:126"
+      }, {
+        "id": "han-gear-127",
+        "slot": 3,
+        "tier": 7,
+        "minLevel": 85,
+        "ko": "군령 묶음",
+        "en": "Orders Bundle",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:127"
+      }, {
+        "id": "han-gear-128",
+        "slot": 3,
+        "tier": 8,
+        "minLevel": 97,
+        "ko": "지형 백서",
+        "en": "Silk Terrain Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:128"
+      }, {
+        "id": "han-gear-129",
+        "slot": 3,
+        "tier": 9,
+        "minLevel": 109,
+        "ko": "하천 백서",
+        "en": "River Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:129"
+      }, {
+        "id": "han-gear-130",
+        "slot": 3,
+        "tier": 10,
+        "minLevel": 121,
+        "ko": "산로 백서",
+        "en": "Mountain Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:130"
+      }, {
+        "id": "han-gear-131",
+        "slot": 3,
+        "tier": 11,
+        "minLevel": 133,
+        "ko": "군영 배치도",
+        "en": "Camp Plan",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:131"
+      }, {
+        "id": "han-gear-132",
+        "slot": 3,
+        "tier": 12,
+        "minLevel": 145,
+        "ko": "관문 지도",
+        "en": "Pass Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:132"
+      }, {
+        "id": "han-gear-133",
+        "slot": 3,
+        "tier": 13,
+        "minLevel": 157,
+        "ko": "성곽 지도",
+        "en": "Fortress Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:133"
+      }, {
+        "id": "han-gear-134",
+        "slot": 3,
+        "tier": 14,
+        "minLevel": 169,
+        "ko": "행군 지도",
+        "en": "Route Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:134"
+      }, {
+        "id": "han-gear-135",
+        "slot": 3,
+        "tier": 15,
+        "minLevel": 181,
+        "ko": "수로 지도",
+        "en": "Waterway Map",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:135"
+      }, {
+        "id": "han-gear-136",
+        "slot": 3,
+        "tier": 16,
+        "minLevel": 193,
+        "ko": "손자병법",
+        "en": "Art of War",
+        "origin": "artifact",
+        "source": "sunzi",
+        "icon": "gear:136"
+      }, {
+        "id": "han-gear-137",
+        "slot": 3,
+        "tier": 17,
+        "minLevel": 205,
+        "ko": "시계 죽간",
+        "en": "Planning Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:137"
+      }, {
+        "id": "han-gear-138",
+        "slot": 3,
+        "tier": 18,
+        "minLevel": 217,
+        "ko": "작전 죽간",
+        "en": "Campaign Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:138"
+      }, {
+        "id": "han-gear-139",
+        "slot": 3,
+        "tier": 19,
+        "minLevel": 229,
+        "ko": "모공 죽간",
+        "en": "Strategy Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:139"
+      }, {
+        "id": "han-gear-140",
+        "slot": 3,
+        "tier": 20,
+        "minLevel": 241,
+        "ko": "군형 죽간",
+        "en": "Disposition Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:140"
+      }, {
+        "id": "han-gear-141",
+        "slot": 3,
+        "tier": 21,
+        "minLevel": 253,
+        "ko": "병세 죽간",
+        "en": "Force Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:141"
+      }, {
+        "id": "han-gear-142",
+        "slot": 3,
+        "tier": 22,
+        "minLevel": 265,
+        "ko": "허실 죽간",
+        "en": "Strength Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:142"
+      }, {
+        "id": "han-gear-143",
+        "slot": 3,
+        "tier": 23,
+        "minLevel": 277,
+        "ko": "군쟁 죽간",
+        "en": "Maneuver Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:143"
+      }, {
+        "id": "han-gear-144",
+        "slot": 3,
+        "tier": 24,
+        "minLevel": 289,
+        "ko": "손빈병법",
+        "en": "Sun Bin Manuscript",
+        "origin": "artifact",
+        "source": "sunzi",
+        "icon": "gear:144"
+      }, {
+        "id": "han-gear-145",
+        "slot": 3,
+        "tier": 25,
+        "minLevel": 301,
+        "ko": "금방 죽간",
+        "en": "Campaign Counsel",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:145"
+      }, {
+        "id": "han-gear-146",
+        "slot": 3,
+        "tier": 26,
+        "minLevel": 313,
+        "ko": "위왕문 죽간",
+        "en": "Royal Questions",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:146"
+      }, {
+        "id": "han-gear-147",
+        "slot": 3,
+        "tier": 27,
+        "minLevel": 325,
+        "ko": "위덕 죽간",
+        "en": "Authority Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:147"
+      }, {
+        "id": "han-gear-148",
+        "slot": 3,
+        "tier": 28,
+        "minLevel": 337,
+        "ko": "팔진 죽간",
+        "en": "Formation Slips",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:148"
+      }, {
+        "id": "han-gear-149",
+        "slot": 3,
+        "tier": 29,
+        "minLevel": 349,
+        "ko": "지보 죽간",
+        "en": "Terrain Counsel",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:149"
+      }, {
+        "id": "han-gear-150",
+        "slot": 3,
+        "tier": 30,
+        "minLevel": 361,
+        "ko": "세비 죽간",
+        "en": "Force Counsel",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:150"
+      }, {
+        "id": "han-gear-151",
+        "slot": 3,
+        "tier": 31,
+        "minLevel": 373,
+        "ko": "선사 죽간",
+        "en": "Troop Counsel",
+        "origin": "reconstruction",
+        "source": "sunzi",
+        "icon": "gear:151"
+      }, {
+        "id": "han-gear-152",
+        "slot": 3,
+        "tier": 32,
+        "minLevel": 385,
+        "ko": "군략 권축",
+        "en": "Strategy Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:152"
+      }, {
+        "id": "han-gear-153",
+        "slot": 3,
+        "tier": 33,
+        "minLevel": 397,
+        "ko": "변경 권축",
+        "en": "Border Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:153"
+      }, {
+        "id": "han-gear-154",
+        "slot": 3,
+        "tier": 34,
+        "minLevel": 409,
+        "ko": "수성 권축",
+        "en": "Defense Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:154"
+      }, {
+        "id": "han-gear-155",
+        "slot": 3,
+        "tier": 35,
+        "minLevel": 421,
+        "ko": "진영 권축",
+        "en": "Formation Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:155"
+      }, {
+        "id": "han-gear-156",
+        "slot": 3,
+        "tier": 36,
+        "minLevel": 433,
+        "ko": "수군 권축",
+        "en": "Fleet Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:156"
+      }, {
+        "id": "han-gear-157",
+        "slot": 3,
+        "tier": 37,
+        "minLevel": 445,
+        "ko": "군량 권축",
+        "en": "Logistics Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:157"
+      }, {
+        "id": "han-gear-158",
+        "slot": 3,
+        "tier": 38,
+        "minLevel": 457,
+        "ko": "연합 권축",
+        "en": "Alliance Scroll",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:158"
+      }, {
+        "id": "han-gear-159",
+        "slot": 3,
+        "tier": 39,
+        "minLevel": 469,
+        "ko": "대장 군략",
+        "en": "General Strategy",
+        "origin": "reconstruction",
+        "source": "slips",
+        "icon": "gear:159"
+      }, {
+        "id": "han-gear-160",
+        "slot": 4,
+        "tier": 0,
+        "minLevel": 1,
+        "ko": "청동 인장",
+        "en": "Bronze Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:160"
+      }, {
+        "id": "han-gear-161",
+        "slot": 4,
+        "tier": 1,
+        "minLevel": 13,
+        "ko": "소인",
+        "en": "Small Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:161"
+      }, {
+        "id": "han-gear-162",
+        "slot": 4,
+        "tier": 2,
+        "minLevel": 25,
+        "ko": "장방인",
+        "en": "Oblong Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:162"
+      }, {
+        "id": "han-gear-163",
+        "slot": 4,
+        "tier": 3,
+        "minLevel": 37,
+        "ko": "환뉴인",
+        "en": "Ring-knob Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:163"
+      }, {
+        "id": "han-gear-164",
+        "slot": 4,
+        "tier": 4,
+        "minLevel": 49,
+        "ko": "교뉴인",
+        "en": "Bridge-knob Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:164"
+      }, {
+        "id": "han-gear-165",
+        "slot": 4,
+        "tier": 5,
+        "minLevel": 61,
+        "ko": "구뉴인",
+        "en": "Turtle-knob Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:165"
+      }, {
+        "id": "han-gear-166",
+        "slot": 4,
+        "tier": 6,
+        "minLevel": 73,
+        "ko": "주머니 인장",
+        "en": "Pouched Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:166"
+      }, {
+        "id": "han-gear-167",
+        "slot": 4,
+        "tier": 7,
+        "minLevel": 85,
+        "ko": "끈묶음 인장",
+        "en": "Cord-bound Seal",
+        "origin": "reconstruction",
+        "source": "seal",
+        "icon": "gear:167"
+      }, {
+        "id": "han-gear-168",
+        "slot": 4,
+        "tier": 8,
+        "minLevel": 97,
+        "ko": "청동 대구",
+        "en": "Bronze Belt Hook",
+        "origin": "artifact",
+        "source": "hook",
+        "icon": "gear:168"
+      }, {
+        "id": "han-gear-169",
+        "slot": 4,
+        "tier": 9,
+        "minLevel": 109,
+        "ko": "단대구",
+        "en": "Short Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:169"
+      }, {
+        "id": "han-gear-170",
+        "slot": 4,
+        "tier": 10,
+        "minLevel": 121,
+        "ko": "장대구",
+        "en": "Long Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:170"
+      }, {
+        "id": "han-gear-171",
+        "slot": 4,
+        "tier": 11,
+        "minLevel": 133,
+        "ko": "비파 대구",
+        "en": "Pipa Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:171"
+      }, {
+        "id": "han-gear-172",
+        "slot": 4,
+        "tier": 12,
+        "minLevel": 145,
+        "ko": "엽형 대구",
+        "en": "Leaf Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:172"
+      }, {
+        "id": "han-gear-173",
+        "slot": 4,
+        "tier": 13,
+        "minLevel": 157,
+        "ko": "수두 대구",
+        "en": "Beast-head Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:173"
+      }, {
+        "id": "han-gear-174",
+        "slot": 4,
+        "tier": 14,
+        "minLevel": 169,
+        "ko": "쌍문 대구",
+        "en": "Twin-band Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:174"
+      }, {
+        "id": "han-gear-175",
+        "slot": 4,
+        "tier": 15,
+        "minLevel": 181,
+        "ko": "곡신 대구",
+        "en": "Curved Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:175"
+      }, {
+        "id": "han-gear-176",
+        "slot": 4,
+        "tier": 16,
+        "minLevel": 193,
+        "ko": "옥환",
+        "en": "Jade Girdle Ring",
+        "origin": "artifact",
+        "source": "ring",
+        "icon": "gear:176"
+      }, {
+        "id": "han-gear-177",
+        "slot": 4,
+        "tier": 17,
+        "minLevel": 205,
+        "ko": "소옥환",
+        "en": "Small Jade Ring",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:177"
+      }, {
+        "id": "han-gear-178",
+        "slot": 4,
+        "tier": 18,
+        "minLevel": 217,
+        "ko": "대옥환",
+        "en": "Broad Jade Ring",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:178"
+      }, {
+        "id": "han-gear-179",
+        "slot": 4,
+        "tier": 19,
+        "minLevel": 229,
+        "ko": "벽형 옥패",
+        "en": "Disc Pendant",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:179"
+      }, {
+        "id": "han-gear-180",
+        "slot": 4,
+        "tier": 20,
+        "minLevel": 241,
+        "ko": "각형 옥패",
+        "en": "Angular Pendant",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:180"
+      }, {
+        "id": "han-gear-181",
+        "slot": 4,
+        "tier": 21,
+        "minLevel": 253,
+        "ko": "황형 옥패",
+        "en": "Arc Pendant",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:181"
+      }, {
+        "id": "han-gear-182",
+        "slot": 4,
+        "tier": 22,
+        "minLevel": 265,
+        "ko": "쌍옥패",
+        "en": "Twin Jade Pendant",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:182"
+      }, {
+        "id": "han-gear-183",
+        "slot": 4,
+        "tier": 23,
+        "minLevel": 277,
+        "ko": "환패 묶음",
+        "en": "Ring Pendants",
+        "origin": "reconstruction",
+        "source": "ring",
+        "icon": "gear:183"
+      }, {
+        "id": "han-gear-184",
+        "slot": 4,
+        "tier": 24,
+        "minLevel": 289,
+        "ko": "금동 용대구",
+        "en": "Gilt Dragon Hook",
+        "origin": "artifact",
+        "source": "hook",
+        "icon": "gear:184"
+      }, {
+        "id": "han-gear-185",
+        "slot": 4,
+        "tier": 25,
+        "minLevel": 301,
+        "ko": "반룡 대구",
+        "en": "Coiled Dragon Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:185"
+      }, {
+        "id": "han-gear-186",
+        "slot": 4,
+        "tier": 26,
+        "minLevel": 313,
+        "ko": "곡룡 대구",
+        "en": "Curved Dragon Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:186"
+      }, {
+        "id": "han-gear-187",
+        "slot": 4,
+        "tier": 27,
+        "minLevel": 325,
+        "ko": "용수 대구",
+        "en": "Dragon-head Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:187"
+      }, {
+        "id": "han-gear-188",
+        "slot": 4,
+        "tier": 28,
+        "minLevel": 337,
+        "ko": "운문 대구",
+        "en": "Cloud Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:188"
+      }, {
+        "id": "han-gear-189",
+        "slot": 4,
+        "tier": 29,
+        "minLevel": 349,
+        "ko": "수문 대구",
+        "en": "Beast Belt Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:189"
+      }, {
+        "id": "han-gear-190",
+        "slot": 4,
+        "tier": 30,
+        "minLevel": 361,
+        "ko": "엽문 대구",
+        "en": "Leaf-relief Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:190"
+      }, {
+        "id": "han-gear-191",
+        "slot": 4,
+        "tier": 31,
+        "minLevel": 373,
+        "ko": "쌍룡 대구",
+        "en": "Twin-dragon Hook",
+        "origin": "reconstruction",
+        "source": "hook",
+        "icon": "gear:191"
+      }, {
+        "id": "han-gear-192",
+        "slot": 4,
+        "tier": 32,
+        "minLevel": 385,
+        "ko": "청동 호부",
+        "en": "Bronze Tiger Tally",
+        "origin": "artifact",
+        "source": "tally",
+        "icon": "gear:192"
+      }, {
+        "id": "han-gear-193",
+        "slot": 4,
+        "tier": 33,
+        "minLevel": 397,
+        "ko": "단호부",
+        "en": "Short Tiger Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:193"
+      }, {
+        "id": "han-gear-194",
+        "slot": 4,
+        "tier": 34,
+        "minLevel": 409,
+        "ko": "장호부",
+        "en": "Long Tiger Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:194"
+      }, {
+        "id": "han-gear-195",
+        "slot": 4,
+        "tier": 35,
+        "minLevel": 421,
+        "ko": "복호부",
+        "en": "Resting Tiger Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:195"
+      }, {
+        "id": "han-gear-196",
+        "slot": 4,
+        "tier": 36,
+        "minLevel": 433,
+        "ko": "앙수호부",
+        "en": "Raised-head Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:196"
+      }, {
+        "id": "han-gear-197",
+        "slot": 4,
+        "tier": 37,
+        "minLevel": 445,
+        "ko": "권미호부",
+        "en": "Curled-tail Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:197"
+      }, {
+        "id": "han-gear-198",
+        "slot": 4,
+        "tier": 38,
+        "minLevel": 457,
+        "ko": "은문호부",
+        "en": "Silver-inlay Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:198"
+      }, {
+        "id": "han-gear-199",
+        "slot": 4,
+        "tier": 39,
+        "minLevel": 469,
+        "ko": "군령 호부",
+        "en": "Command Tally",
+        "origin": "reconstruction",
+        "source": "tally",
+        "icon": "gear:199"
+      }]);
+      function equipmentTier(level) {
+        var n = Number.isFinite(level) ? Math.max(1, Math.floor(level)) : 1;
+        var tier = 0;
+        while (tier < 39 && n >= GEAR_LEVELS[tier + 1]) tier++;
+        return tier;
+      }
+      function equipmentDefinition(item) {
+        var slot = Number.isInteger(item.slot) && item.slot >= 0 && item.slot < 5 ? item.slot : 0;
+        return EQUIPMENT_CATALOG[slot * 40 + equipmentTier(item.level)];
+      }
+      function equipmentName(item, locale) {
+        return equipmentDefinition(item)[locale === 'ko' ? 'ko' : 'en'];
+      }
+      function equipmentIcon(item) {
+        return equipmentDefinition(item).icon;
+      }
+      function equipmentOrigin(item, locale) {
+        var origin = equipmentDefinition(item).origin;
+        return (locale === 'ko' ? {
+          artifact: '유물·문헌 참고',
+          reconstruction: '시대풍 재구성',
+          romance: '삼국지연의'
+        } : {
+          artifact: 'Artifact / text inspired',
+          reconstruction: 'Period-inspired design',
+          romance: 'Romance of Three Kingdoms'
+        })[origin];
+      }
+      function equipmentDescription(item, locale) {
+        var d = equipmentDefinition(item),
+          next = GEAR_LEVELS[d.tier + 1],
+          range = next ? d.minLevel + '–' + (next - 1) : d.minLevel + '+';
+        return locale === 'ko' ? d.ko + " \xB7 " + equipmentOrigin(item, locale) + "\n\uC7A5\uBE44 \uB808\uBCA8 " + range + " \xB7 \uC678\uD615 " + (d.tier + 1) + "/40\n" + (d.origin === 'romance' ? '소설 속 무기를 재해석했습니다. 실제 한대 유물로 소개하지 않습니다.' : d.origin === 'artifact' ? '한대 유물·전승 문헌의 종류를 참고한 게임 그림입니다. 특정 유물의 복제품은 아닙니다.' : '한대 분위기로 재구성한 창작 장비입니다. 특정 실물·장수의 소유품을 뜻하지 않습니다.') + "\n\uC678\uD615 \uB2E8\uACC4\uB294 \uAC8C\uC784 \uBD84\uB958\uC774\uBA70 \uC5ED\uC0AC\uC801 \uC6B0\uC5F4\uC774 \uC544\uB2D9\uB2C8\uB2E4. \uD488\uC9C8\xB7\uBC30\uC728\uC740 \uAE30\uC874 \uC7A5\uBE44 \uC218\uCE58\uB97C \uB530\uB985\uB2C8\uB2E4." : d.en + " \xB7 " + equipmentOrigin(item, locale) + "\nGear level " + range + " \xB7 Appearance " + (d.tier + 1) + "/40\n" + (d.origin === 'romance' ? 'Inspired by a weapon in the novel; not presented as a Han artifact.' : d.origin === 'artifact' ? 'Game art inspired by Han artifact types or transmitted texts, not an exact replica.' : 'An original period-inspired design, not an identified artifact or a named general’s possession.') + "\nVisual tiers are game categories, not historical superiority. Quality and power retain the saved stats.";
+      }
+      /** Same inclusive integer range produced by Game.drop; previews do not consume RNG. */
+      function equipmentPreview(slot, maxStage) {
+        var low = Math.max(1, Math.floor(maxStage * .8)),
+          high = Math.max(1, Math.ceil(maxStage * 1.2) - 1);
+        return {
+          low: low,
+          high: high,
+          first: equipmentDefinition({
+            slot: slot,
+            level: low
+          }),
+          last: equipmentDefinition({
+            slot: slot,
+            level: high
+          })
+        };
+      }
+      function equipmentPreviewName(slot, maxStage, locale) {
+        var p = equipmentPreview(slot, maxStage),
+          key = locale === 'ko' ? 'ko' : 'en';
+        return p.first.id === p.last.id ? p.first[key] : p.first[key] + ' / ' + p.last[key];
+      }
+      cclegacy._RF.pop();
+    }
+  };
+});
+
+System.register("chunks:///_virtual/EquipmentCatalogUI.ts", ['cc', './EquipmentCatalog.ts', './UITheme.ts'], function (exports) {
+  var cclegacy, Label, equipmentDefinition, EQUIPMENT_CATALOG, equipmentOrigin, equipmentDescription, UI;
+  return {
+    setters: [function (module) {
+      cclegacy = module.cclegacy;
+      Label = module.Label;
+    }, function (module) {
+      equipmentDefinition = module.equipmentDefinition;
+      EQUIPMENT_CATALOG = module.EQUIPMENT_CATALOG;
+      equipmentOrigin = module.equipmentOrigin;
+      equipmentDescription = module.equipmentDescription;
+    }, function (module) {
+      UI = module.UI;
+    }],
+    execute: function () {
+      exports('equipmentCatalog', equipmentCatalog);
+      cclegacy._RF.push({}, "69722048ehBibZTBbb800g8", "EquipmentCatalogUI", undefined);
+      /** Read-only catalog: browsing never grants an item, unlock or collection reward. */
+      function equipmentCatalog(a, slot) {
+        if (slot === void 0) {
+          slot = 0;
+        }
+        var ko = a.game.s.locale === 'ko',
+          p = a.open(ko ? '장비 200종' : '200 Equipment Designs', 720),
+          names = ko ? ['무기', '투구', '갑옷', '병서', '장신구'] : ['Weapon', 'Head', 'Armor', 'Text', 'Charm'];
+        var _loop = function _loop(i) {
+          a.button(p, names[i], -160 + i * 80, 272, 76, 38, function () {
+            return equipmentCatalog(a, i);
+          }, i === slot, {
+            category: 'codex',
+            fontSize: 13,
+            reportRewards: false
+          });
+        };
+        for (var i = 0; i < 5; i++) {
+          _loop(i);
+        }
+        a.label(p, ko ? '획득 레벨에 따라 외형이 정해집니다.' : 'Appearance follows the item’s rolled level.', 0, 226, 378, 32, 14, UI.muted);
+        var owned = new Set(a.game.confirmedEquipment().map(function (e) {
+          return equipmentDefinition(e).id;
+        }));
+        a.scroll(p, 0, -37, 400, 480, EQUIPMENT_CATALOG.filter(function (d) {
+          return d.slot === slot;
+        }).map(function (d) {
+          return {
+            title: '',
+            height: 100,
+            lazyRender: true,
+            render: function render(n) {
+              n.name = 'catalog-' + d.id;
+              a.ui.surface(n, '#26352f', 'cut');
+              a.ui.icon(a.nodeAt(n, 'catalog-art', -145, 0, 76, 76), d.icon);
+              a.label(n, ko ? d.ko : d.en, 42, 24, 266, 28, 18, UI.text, Label.HorizontalAlign.LEFT);
+              a.label(n, 'Lv.' + d.minLevel + (d.tier === 39 ? '+' : '–' + (d.minLevel + 11)) + ' · ' + (owned.has(d.id) ? ko ? '보유' : 'Owned' : ko ? '미보유' : 'Not owned'), 42, -3, 266, 23, 13, UI.gold, Label.HorizontalAlign.LEFT);
+              a.label(n, equipmentOrigin({
+                slot: slot,
+                level: d.minLevel
+              }, a.game.s.locale), 42, -28, 266, 22, 12, UI.muted, Label.HorizontalAlign.LEFT);
+              a.touchAction(n, function () {
+                return a.info(ko ? d.ko : d.en, equipmentDescription({
+                  slot: slot,
+                  level: d.minLevel
+                }, a.game.s.locale));
+              }, undefined, false, false);
+            }
+          };
+        }));
+      }
+      cclegacy._RF.pop();
+    }
+  };
+});
+
+System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentCatalog.ts', './EquipmentUI.ts', './PopupIllustrationUI.ts', './UITheme.ts'], function (exports) {
+  var cclegacy, UITransform, Mask, Sprite, equipmentName, equipmentIcon, equipmentDescription, equipmentOrigin, EQUIPMENT_STYLE, equipmentStats, equipmentHelp, popupPanel, UI;
   return {
     setters: [function (module) {
       cclegacy = module.cclegacy;
       UITransform = module.UITransform;
       Mask = module.Mask;
+      Sprite = module.Sprite;
+    }, function (module) {
+      equipmentName = module.equipmentName;
+      equipmentIcon = module.equipmentIcon;
+      equipmentDescription = module.equipmentDescription;
+      equipmentOrigin = module.equipmentOrigin;
     }, function (module) {
       EQUIPMENT_STYLE = module.EQUIPMENT_STYLE;
       equipmentStats = module.equipmentStats;
       equipmentHelp = module.equipmentHelp;
-      EQUIPMENT_ICONS = module.EQUIPMENT_ICONS;
     }, function (module) {
       popupPanel = module.popupPanel;
     }, function (module) {
@@ -14427,6 +17071,7 @@ System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI
         }
       };
       function scene(a, p, e) {
+        var _picture$getComponent;
         var style = EQUIPMENT_STYLE[e.slot],
           words = WORDS[a.game.s.locale],
           n = a.nodeAt(p, 'equipment-detail-scene', 0, 174, 388, 206);
@@ -14446,34 +17091,39 @@ System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI
         });
         g.close();
         g.fill();
-        // Existing approved item art: alpha bounds remove its empty margins without changing pixels.
-        var source = e.slot === 0 ? 'equipment/rifle' : e.slot === 2 ? 'equipment/vest' : e.slot === 3 ? 'equipment/radio' : null,
-          frame = source ? a.ui.frames.get(source) : null;
-        var bounds = e.slot === 0 ? [6, 26, 90, 70] : e.slot === 2 ? [6, 15, 90, 81] : e.slot === 3 ? [27, 6, 69, 90] : e.slot === 1 ? [0, 0, 16, 15] : [0, 1, 16, 15];
-        var fw = (frame == null ? void 0 : frame.originalSize.width) || 16,
-          fh = (frame == null ? void 0 : frame.originalSize.height) || 16,
-          scale = Math.min(344 / (bounds[2] - bounds[0]), 154 / (bounds[3] - bounds[1]));
-        var art = a.nodeAt(clip, 'equipment-portrait', (fw / 2 - (bounds[0] + bounds[2]) / 2) * scale, 20 - (fh / 2 - (bounds[1] + bounds[3]) / 2) * scale, fw * scale, fh * scale);
-        a.ui.icon(a.nodeAt(art, 'equipment-art', 0, 0, fw * scale, fh * scale), EQUIPMENT_ICONS[e.slot]);
+        // Measure the exact Sprite selected by the shared equipment icon renderer.
+        // Bounds are normalized to its atlas frame; legacy rifle/vest sizes do not apply.
+        var art = a.nodeAt(clip, 'equipment-portrait', 0, 10, 160, 160),
+          picture = a.nodeAt(art, 'equipment-art', 0, 0, 160, 160);
+        a.ui.icon(picture, equipmentIcon(e));
+        var frame = (_picture$getComponent = picture.getComponent(Sprite)) == null ? void 0 : _picture$getComponent.spriteFrame,
+          content = frame && a.ui.spriteFrameBounds(frame) || [0, 0, 1, 1];
+        var fw = (frame == null ? void 0 : frame.originalSize.width) || 160,
+          fh = (frame == null ? void 0 : frame.originalSize.height) || 160;
+        var bounds = [content[0] * fw, content[1] * fh, content[2] * fw, content[3] * fh];
+        var scale = Math.min(344 / Math.max(1, bounds[2] - bounds[0]), 134 / Math.max(1, bounds[3] - bounds[1]));
+        var dx = (fw / 2 - (bounds[0] + bounds[2]) / 2) * scale,
+          dy = ((bounds[1] + bounds[3]) / 2 - fh / 2) * scale;
+        a.ui.resize(art, fw * scale, fh * scale);
+        a.ui.resize(picture, fw * scale, fh * scale);
+        picture.setPosition(dx, dy, 0);
         a.iconHelp(art, function () {
-          return a.tr('equipment.help.part', {
-            name: a.tr('slot.' + e.slot)
-          });
+          return equipmentDescription(e, a.game.s.locale);
         });
         art.equipmentPreview = {
           slot: e.slot,
-          key: EQUIPMENT_ICONS[e.slot],
+          key: equipmentIcon(e),
           bounds: bounds,
           scale: scale,
           visibleWidth: (bounds[2] - bounds[0]) * scale,
-          visibleHeight: (bounds[3] - bounds[1]) * scale
+          visibleHeight: (bounds[3] - bounds[1]) * scale,
+          centerX: dx + ((bounds[0] + bounds[2]) / 2 - fw / 2) * scale,
+          centerY: 10 + dy + (fh / 2 - (bounds[1] + bounds[3]) / 2) * scale
         };
         var identity = a.nodeAt(clip, 'equipment-detail-identity', 0, -84, 366, 30);
         a.ui.surface(identity, '#20212a', 'cut');
-        a.label(identity, a.tr('slot.' + e.slot), -123, 0, 112, 26, 18, UI.text).node.name = 'equipment-name';
-        a.label(identity, e.set >= 0 ? a.tr('extra.set', {
-          id: e.set + 1
-        }) : a.tr('equipment.noSet'), -1, 0, 126, 24, 13, style.accent).node.name = 'equipment-set-name';
+        a.label(identity, equipmentName(e, a.game.s.locale), -61, 0, 236, 26, 16, UI.text).node.name = 'equipment-name';
+        a.label(n, equipmentOrigin(e, a.game.s.locale), 0, 88, 360, 22, 13, style.accent).node.name = 'equipment-origin';
         var equipped = a.game.s.equipped[e.slot] === e.id,
           status = a.nodeAt(identity, 'equipment-detail-status', 125, 0, 112, 26);
         a.ui.surface(status, equipped ? '#31594e' : '#38433e', 'cut');
@@ -14516,14 +17166,16 @@ System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI
           equipped = (current == null ? void 0 : current.id) === e.id,
           words = WORDS[a.game.s.locale],
           style = EQUIPMENT_STYLE[e.slot],
-          p = a.open(a.tr('slot.' + e.slot), 746, true, 'slate');
+          p = a.open(equipmentName(e, a.game.s.locale), 746, true, 'slate');
         p.equipmentId = e.id;
         scene(a, p, e);
         equipmentStats(a, p, e, 42, 182);
         var compare = a.nodeAt(p, 'equipment-comparison', 0, -71, 388, 88);
         a.ui.surface(compare, '#24342c', 'cut');
-        a.label(p, a.tr('equipment.current'), -117, -44, 142, 22, 14, UI.muted);
-        a.label(p, a.tr('equipment.selected'), 117, -44, 142, 22, 14, UI.muted);
+        a.label(p, current ? equipmentName(current, a.game.s.locale) : a.tr('equipment.current'), -117, -42, 142, 30, 12, UI.muted);
+        a.label(p, equipmentName(e, a.game.s.locale), 117, -42, 142, 30, 12, UI.muted);
+        if (current) a.ui.icon(a.nodeAt(compare, 'current-gear-art', -178, -10, 24, 24), equipmentIcon(current));
+        a.ui.icon(a.nodeAt(compare, 'selected-gear-art', 178, -10, 24, 24), equipmentIcon(e));
         a.metric(p, 'symbol:damage', '×' + ((current == null ? void 0 : current.power) || 1).toFixed(2), -112, -81, 160, a.tr('equipment.help.current', {
           power: ((current == null ? void 0 : current.power) || 1).toFixed(2)
         })).name = 'equipment-current-power';
@@ -14626,7 +17278,7 @@ System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI
         var help = a.nodeAt(p, 'equipment-help', 178, -335, 44, 44);
         a.ui.icon(a.nodeAt(help, 'equipment-help-icon', 0, 0, 22, 22), 'symbol:info', style.accent);
         a.iconHelp(help, function () {
-          return words.guide + '\n\n' + words.registerHelp;
+          return equipmentDescription(e, a.game.s.locale) + '\n\n' + words.guide;
         });
       }
       cclegacy._RF.pop();
@@ -14634,18 +17286,22 @@ System.register("chunks:///_virtual/EquipmentDetailUI.ts", ['cc', './EquipmentUI
   };
 });
 
-System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './Amount.ts', './UITheme.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, cclegacy, Label, UITransform, Graphics, Sprite, isValid, display, UI, BUTTON_TONES;
+System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalog.ts', './Amount.ts', './UITheme.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, cclegacy, Sprite, Label, UITransform, Graphics, isValid, equipmentIcon, equipmentDescription, equipmentName, display, UI, BUTTON_TONES;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
     }, function (module) {
       cclegacy = module.cclegacy;
+      Sprite = module.Sprite;
       Label = module.Label;
       UITransform = module.UITransform;
       Graphics = module.Graphics;
-      Sprite = module.Sprite;
       isValid = module.isValid;
+    }, function (module) {
+      equipmentIcon = module.equipmentIcon;
+      equipmentDescription = module.equipmentDescription;
+      equipmentName = module.equipmentName;
     }, function (module) {
       display = module.display;
     }, function (module) {
@@ -14673,14 +17329,18 @@ System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelH
       var TONES = [BUTTON_TONES.battle, BUTTON_TONES.shop, BUTTON_TONES.upgrade, BUTTON_TONES.ascend, BUTTON_TONES.confirm];
 
       /** Fit the visible part of the approved equipment art, preserving its aspect ratio. */
-      function equipmentRewardArt(a, parent, slot, x, y, w, h) {
-        var key = slot === 0 ? 'equipment/rifle' : slot === 2 ? 'equipment/vest' : slot === 3 ? 'equipment/radio' : null,
-          frame = key ? a.ui.frames.get(key) : null;
-        var bounds = slot === 0 ? [6, 26, 90, 70] : slot === 2 ? [6, 15, 90, 81] : slot === 3 ? [27, 6, 69, 90] : slot === 1 ? [0, 0, 16, 15] : [0, 1, 16, 15];
-        var fw = (frame == null ? void 0 : frame.originalSize.width) || 16,
-          fh = (frame == null ? void 0 : frame.originalSize.height) || 16,
-          scale = Math.min(w / (bounds[2] - bounds[0]), h / (bounds[3] - bounds[1]));
-        a.ui.icon(a.nodeAt(parent, 'reward-equipment-hero', x + (fw / 2 - (bounds[0] + bounds[2]) / 2) * scale, y + ((bounds[1] + bounds[3]) / 2 - fh / 2) * scale, fw * scale, fh * scale), EQUIPMENT_ICONS[slot]);
+      function equipmentRewardArt(a, parent, item, x, y, w, h) {
+        var _picture$getComponent;
+        var picture = a.nodeAt(parent, 'reward-equipment-hero', x, y, w, h);
+        a.ui.icon(picture, equipmentIcon(item));
+        var frame = (_picture$getComponent = picture.getComponent(Sprite)) == null ? void 0 : _picture$getComponent.spriteFrame;
+        if (!frame) return;
+        var b = a.ui.spriteFrameBounds(frame) || [0, 0, 1, 1],
+          fw = frame.originalSize.width,
+          fh = frame.originalSize.height,
+          scale = Math.min(w / Math.max(1, (b[2] - b[0]) * fw), h / Math.max(1, (b[3] - b[1]) * fh));
+        a.ui.resize(picture, fw * scale, fh * scale);
+        picture.setPosition(x + (.5 - (b[0] + b[2]) / 2) * fw * scale, y + ((b[1] + b[3]) / 2 - .5) * fh * scale);
       }
       function equipmentHelp(a, item, kind) {
         var current = a.game.s.equipment.find(function (e) {
@@ -14703,15 +17363,13 @@ System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelH
           x = compact ? -140 : -131,
           art = a.nodeAt(parent, 'equipment-portrait', x, y, size, size);
         a.ui.surface(art, TONES[item.slot], 'cut');
-        a.ui.icon(a.nodeAt(art, 'equipment-art', 0, 0, size - 10, size - 10), EQUIPMENT_ICONS[item.slot]);
+        a.ui.icon(a.nodeAt(art, 'equipment-art', 0, 0, size - 10, size - 10), equipmentIcon(item));
         a.iconHelp(art, function () {
-          return a.tr('equipment.help.part', {
-            name: a.tr('slot.' + item.slot)
-          });
+          return equipmentDescription(item, a.game.s.locale);
         });
         var labelX = compact ? 40 : 42,
           width = compact ? 226 : 222;
-        a.label(parent, a.tr('slot.' + item.slot), labelX, y + 17, width, 30, compact ? 21 : 24, compact ? '#192526' : UI.text, Label.HorizontalAlign.LEFT).node.name = 'equipment-name';
+        a.label(parent, equipmentName(item, a.game.s.locale), labelX, y + 17, width, 30, compact ? 17 : 20, compact ? '#192526' : UI.text, Label.HorizontalAlign.LEFT).node.name = 'equipment-name';
         a.label(parent, item.set >= 0 ? a.tr('extra.set', {
           id: item.set + 1
         }) : a.tr('equipment.noSet'), labelX, y - 15, width, 26, 15, compact ? EQUIPMENT_STYLE[item.slot].dark : UI.gold, Label.HorizontalAlign.LEFT).node.name = 'equipment-set-name';
@@ -14859,10 +17517,10 @@ System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelH
             var portrait = a.nodeAt(card, 'equipment-portrait', left + (drops ? 53 : 45), 6, drops ? 84 : 60, drops ? 84 : 60);
             a.ui.surface(portrait, style.accent, 'cut');
             var picture = a.nodeAt(portrait, 'equipment-art', 0, 0, 52, 52);
-            a.ui.icon(picture, EQUIPMENT_ICONS[item.slot]);
+            a.ui.icon(picture, equipmentIcon(item));
             if (drops) {
-              var _picture$getComponent;
-              var frame = (_picture$getComponent = picture.getComponent(Sprite)) == null ? void 0 : _picture$getComponent.spriteFrame,
+              var _picture$getComponent2;
+              var frame = (_picture$getComponent2 = picture.getComponent(Sprite)) == null ? void 0 : _picture$getComponent2.spriteFrame,
                 box = frame && a.ui.spriteFrameBounds(frame) || [0, 0, 1, 1];
               var fw = (frame == null ? void 0 : frame.originalSize.width) || 52,
                 fh = (frame == null ? void 0 : frame.originalSize.height) || 52,
@@ -14871,12 +17529,10 @@ System.register("chunks:///_virtual/EquipmentUI.ts", ['./rollupPluginModLoBabelH
               picture.setPosition((.5 - (box[0] + box[2]) / 2) * fw * scale, ((box[1] + box[3]) / 2 - .5) * fh * scale);
             }
             a.iconHelp(portrait, function () {
-              return a.tr('equipment.help.part', {
-                name: a.tr('slot.' + item.slot)
-              });
+              return equipmentDescription(item, a.game.s.locale);
             });
             var titleW = w - (drops ? 216 : 188),
-              name = a.label(card, a.tr('slot.' + item.slot), left + textLeft + titleW / 2, 40, titleW - 22, 28, 19, '#192526', Label.HorizontalAlign.LEFT);
+              name = a.label(card, equipmentName(item, a.game.s.locale), left + textLeft + titleW / 2, 40, titleW - 22, 36, 16, '#192526', Label.HorizontalAlign.LEFT);
             name.node.name = 'equipment-name';
             a.touchAction(name.node, kind === 'inventory' ? function () {
               return a.item(item);
@@ -15571,8 +18227,8 @@ System.register("chunks:///_virtual/Expansion.ts", ['./rollupPluginModLoBabelHel
   };
 });
 
-System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './MailUI.ts', './EquipmentUI.ts', './SkillCatalog.ts', './MercenaryDetailUI.ts', './SkillUI.ts', './RewardClaims.ts', './EntryPolicy.ts', './LiveOps.ts', './Balance.ts', './UITheme.ts', './Expansion.ts', './Amount.ts', './I18n.ts'], function (exports) {
-  var _extends, _asyncToGenerator, _regeneratorRuntime, _createClass, _createForOfIteratorHelperLoose, cclegacy, sys, isValid, ScrollView, Vec2, UITransform, tween, Vec3, mailTabs, mailDetails, equipmentListRow, talentIcon, MercenaryDetailUI, talentHelp, rewardDelta, featureUnlocked, mailExpiry, GROWTH_STATS, gemstoneSlots, gemstoneBonus, UI, Expansion, display, t;
+System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalog.ts', './MailUI.ts', './EquipmentUI.ts', './SkillCatalog.ts', './MercenaryDetailUI.ts', './SkillUI.ts', './RewardClaims.ts', './EntryPolicy.ts', './LiveOps.ts', './Balance.ts', './UITheme.ts', './Expansion.ts', './Amount.ts', './I18n.ts'], function (exports) {
+  var _extends, _asyncToGenerator, _regeneratorRuntime, _createClass, _createForOfIteratorHelperLoose, cclegacy, sys, isValid, ScrollView, Vec2, UITransform, tween, Vec3, equipmentPreviewName, equipmentPreview, mailTabs, mailDetails, equipmentListRow, talentIcon, MercenaryDetailUI, talentHelp, rewardDelta, featureUnlocked, mailExpiry, GROWTH_STATS, gemstoneSlots, gemstoneBonus, UI, Expansion, display, t;
   return {
     setters: [function (module) {
       _extends = module.extends;
@@ -15589,6 +18245,9 @@ System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelH
       UITransform = module.UITransform;
       tween = module.tween;
       Vec3 = module.Vec3;
+    }, function (module) {
+      equipmentPreviewName = module.equipmentPreviewName;
+      equipmentPreview = module.equipmentPreview;
     }, function (module) {
       mailTabs = module.mailTabs;
       mailDetails = module.mailDetails;
@@ -16736,14 +19395,18 @@ System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelH
           var a = this.a,
             target = this.g.petRewardTarget(),
             p = this.maintenanceContent(a.open(this.tr('extra.petPuzzle'), 730)),
-            matches = this.x.petMatched.length / 2;
+            matches = this.x.petMatched.length / 2,
+            boardModal = a.modal;
           a.label(p, this.tr('extra.puzzleInfo'), 0, 253, 375, 65, 16);
-          a.metric(p, 'interface:energy', this.tr('extra.puzzleAttempts', {
+          a.metric(p, 'cards', this.tr('extra.puzzleAttempts', {
             energy: this.x.petEnergy
-          }), -97, 199, 188);
-          a.metric(p, 'interface:drone', this.tr('extra.puzzlePairs', {
+          }), -97, 199, 188, this.tr('ui.help.attempts'));
+          a.metric(p, 'drones:' + target, this.tr('extra.puzzlePairs', {
             matches: matches
-          }), 97, 199, 188);
+          }), 97, 199, 188, this.tr('extra.puzzleTarget', {
+            name: this.tr('pet.' + target),
+            level: this.g.s.pets[target]
+          }));
           a.label(p, this.tr('extra.puzzleTarget', {
             name: this.tr('pet.' + target),
             level: this.g.s.pets[target]
@@ -16753,14 +19416,36 @@ System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelH
               visible = matched || _this22.x.petFace.includes(i),
               part = _this22.x.petBoard[i];
             var card = a.button(p, '', -147 + i % 4 * 98, 103 - Math.floor(i / 4) * 83, 88, 76, function () {
+              if (a.modal !== boardModal || a.rewards.busy) return;
+              var matchedBefore = _this22.x.petMatched.length,
+                target = _this22.g.petRewardTarget(),
+                day = _this22.x.day;
+              if (!_this22.e.petTile(i, _this22.id('pet-tile'))) {
+                a.flushNotice();
+                return;
+              }
               a.sound('card_flip');
-              a.rewards.earned(_this22.tr('extra.petPuzzle'), 'maintenance:' + _this22.x.day + ':' + _this22.id('pair'), function (g) {
-                return new Expansion(g).petTile(i, _this22.id('pet-tile'));
-              }, function () {
+              var done = function done() {
                 _this22.petPuzzle();
                 a.updateHUD();
-              });
+              };
+              // Only a newly completed pair opens a reward; unrelated account deltas cannot replay it.
+              if (_this22.x.petMatched.length === matchedBefore + 2) {
+                var levels = _this22.g.s.pets.map(function (_, id) {
+                  return id === target ? 1 : 0;
+                });
+                a.rewards.received(_this22.tr('extra.petPuzzle'), 'maintenance:' + day + ':pair:' + part, _extends({
+                  collections: {
+                    pets: levels
+                  }
+                }, _this22.x.petMatched.length === 16 ? {
+                  currencies: {
+                    shards: 5
+                  }
+                } : {}), done);
+              } else done();
             }, visible, {
+              reportRewards: false,
               hint: _this22.tr(visible ? 'extra.part.' + part : 'extra.puzzleFlip'),
               unavailable: function unavailable() {
                 return _this22.g.s.maxStage < 8 ? _this22.tr('hero.locked', {
@@ -16779,8 +19464,8 @@ System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelH
             a.ui.surface(card, matched ? UI.mint : visible ? UI.paper : blocked ? '#444852' : UI.panel, 'cut', 255, true);
             if (blocked) a.ui.icon(a.nodeAt(card, 'maintenance-lock', 0, 0, 26, 26), 'lock');
             if (visible) {
-              a.ui.icon(a.nodeAt(card, 'maintenance-part', 0, 9, 45, 45), 'interface:part-' + part);
-              a.label(card, _this22.tr('extra.part.' + part), 0, -24, 80, 22, 14, '#111114');
+              a.ui.icon(a.nodeAt(card, 'maintenance-part', 0, 9, 45, 45), 'drones:' + part);
+              a.label(card, _this22.tr('extra.part.' + part), 0, -24, 80, 22, 12, '#111114');
             }
           };
           for (var i = 0; i < 16; i++) {
@@ -17642,10 +20327,10 @@ System.register("chunks:///_virtual/ExpansionUI.ts", ['./rollupPluginModLoBabelH
             length: 5
           }, function (_, slot) {
             return {
-              title: _this47.tr("slot." + slot),
-              sub: _this47.tr(_this47.g.s.setHistory.includes(i * 5 + slot) ? 'extra.collected' : 'extra.missing'),
+              title: equipmentPreviewName(slot, _this47.g.s.maxStage, _this47.g.s.locale),
+              sub: _this47.tr("slot." + slot) + ' · ' + _this47.tr(_this47.g.s.setHistory.includes(i * 5 + slot) ? 'extra.collected' : 'extra.missing'),
               icon: slot,
-              art: ['equipment:rifle', 'equipment:helmet', 'equipment:vest', 'equipment:radio', 'equipment:rank'][slot],
+              art: equipmentPreview(slot, _this47.g.s.maxStage).first.icon,
               unavailable: function unavailable() {
                 return _this47.g.s.setHistory.includes(i * 5 + slot) ? _this47.tr('action.alreadyCrafted') : _this47.g.s.equipment.length >= 100 ? _this47.tr('error.full') : _this47.a.costReason('shards', _this47.g.craftCost(i, slot));
               },
@@ -18860,8 +21545,8 @@ System.register("chunks:///_virtual/FeatureLessons.ts", ['cc'], function (export
   };
 });
 
-System.register("chunks:///_virtual/Feedback.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './SkillCatalog.ts', './Amount.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, _extends, _createClass, cclegacy, talentIcon, tacticIcon, heroSkillIcon, ZERO, sub;
+System.register("chunks:///_virtual/Feedback.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalog.ts', './SkillCatalog.ts', './Amount.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, _extends, _createClass, cclegacy, equipmentIcon, talentIcon, tacticIcon, heroSkillIcon, ZERO, sub;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -18869,6 +21554,8 @@ System.register("chunks:///_virtual/Feedback.ts", ['./rollupPluginModLoBabelHelp
       _createClass = module.createClass;
     }, function (module) {
       cclegacy = module.cclegacy;
+    }, function (module) {
+      equipmentIcon = module.equipmentIcon;
     }, function (module) {
       talentIcon = module.talentIcon;
       tacticIcon = module.tacticIcon;
@@ -18957,7 +21644,7 @@ System.register("chunks:///_virtual/Feedback.ts", ['./rollupPluginModLoBabelHelp
           var e = _step.value;
           rewards['item:' + e.id] = {
             key: 'equipment.item',
-            icon: ['equipment:rifle', 'equipment:helmet', 'equipment:vest', 'equipment:radio', 'equipment:rank'][e.slot],
+            icon: equipmentIcon(e),
             value: 1,
             args: {
               id: e.id,
@@ -19187,8 +21874,8 @@ System.register("chunks:///_virtual/Feedback.ts", ['./rollupPluginModLoBabelHelp
   };
 });
 
-System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './PopupIllustrationUI.ts', './SpeechIllustrationUI.ts', './MercenaryUnlock.ts', './EquipmentUI.ts', './RewardArtUI.ts', './Feedback.ts', './UITheme.ts', './Mercenaries.ts', './Config.ts', './Amount.ts', './Dialogue.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, _extends, _createClass, cclegacy, BlockInputEvents, Node, isValid, Label, tween, Vec3, Graphics, Mask, UIOpacity, popupIllustration, speechIllustration, mercenaryUnlocked, equipmentReward, equipmentRewardArt, rewardBackground, feedbackSnapshot, feedbackDiff, growthCounters, GrowthFeedbackQueue, UI, attackProfile, attackSeconds, mercenaryArt, PETS, ARTIFACTS, CARDS, HEROES, display, ZERO, sub, DialogueDeck;
+System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalog.ts', './PopupIllustrationUI.ts', './SpeechIllustrationUI.ts', './MercenaryUnlock.ts', './EquipmentUI.ts', './RewardArtUI.ts', './Feedback.ts', './UITheme.ts', './Mercenaries.ts', './Config.ts', './Amount.ts', './Dialogue.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, _extends, _createClass, cclegacy, BlockInputEvents, Node, isValid, Label, tween, Vec3, Graphics, Mask, UIOpacity, equipmentIcon, equipmentName, popupIllustration, speechIllustration, mercenaryUnlocked, equipmentReward, equipmentRewardArt, rewardBackground, feedbackSnapshot, feedbackDiff, growthCounters, GrowthFeedbackQueue, UI, attackProfile, attackSeconds, mercenaryArt, PETS, ARTIFACTS, CARDS, HEROES, display, ZERO, sub, DialogueDeck;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -19205,6 +21892,9 @@ System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHe
       Graphics = module.Graphics;
       Mask = module.Mask;
       UIOpacity = module.UIOpacity;
+    }, function (module) {
+      equipmentIcon = module.equipmentIcon;
+      equipmentName = module.equipmentName;
     }, function (module) {
       popupIllustration = module.popupIllustration;
     }, function (module) {
@@ -19412,7 +22102,7 @@ System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHe
             if (found.length) this.queue.push(found.map(function (e) {
               return {
                 key: 'equipment.item',
-                icon: ['equipment:rifle', 'equipment:helmet', 'equipment:vest', 'equipment:radio', 'equipment:rank'][e.slot],
+                icon: equipmentIcon(e),
                 value: 1,
                 args: {
                   id: e.id,
@@ -19464,7 +22154,10 @@ System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHe
           var catalog = e.key === 'feedback.pets' ? PETS : e.key === 'feedback.artifacts' ? ARTIFACTS : e.key === 'feedback.cards' || e.key === 'feedback.fragments' ? CARDS : null;
           if (catalog && catalog[index]) return this.a.tr(catalog[index].name);
           if (e.key === 'equipment.item') {
-            args.slot = this.a.tr('slot.' + args.slot);
+            args.slot = equipmentName({
+              slot: Number(args.slot),
+              level: Number(args.level)
+            }, this.a.game.s.locale);
             args.rarity = this.a.tr('rarity.' + args.rarity);
           }
           return this.a.tr(e.key, args);
@@ -19526,7 +22219,10 @@ System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHe
             var visible = gear.slice(0, 3),
               width = 344 / visible.length;
             visible.forEach(function (e, i) {
-              return equipmentRewardArt(a, panel, Number(e.args.slot), (i - (visible.length - 1) / 2) * width, h / 2 - 127, width - 16, 100);
+              return equipmentRewardArt(a, panel, {
+                slot: Number(e.args.slot),
+                level: Number(e.args.level)
+              }, (i - (visible.length - 1) / 2) * width, h / 2 - 127, width - 16, 100);
             });
           } else {
             var crest = a.nodeAt(panel, 'reward-celebration', 0, h / 2 - 126, 88, 88);
@@ -19844,7 +22540,7 @@ System.register("chunks:///_virtual/FeedbackUI.ts", ['./rollupPluginModLoBabelHe
           this.dismissBanner(n);
           a.ui.surface(a.nodeAt(n, 'equipment-header', 0, 0, 200, 136), UI.bg, 'slant');
           var profile = speechIllustration(a, n, 'equipment-speaker', -1, -77, 0, 36, 128).clip;
-          a.ui.icon(a.nodeAt(n, 'equipment-icon', 84, 51, 18, 18), ['equipment:rifle', 'equipment:helmet', 'equipment:vest', 'equipment:radio', 'equipment:rank'][e.slot]);
+          a.ui.icon(a.nodeAt(n, 'equipment-icon', 84, 51, 18, 18), equipmentIcon(item));
           a.label(n, a.tr(e.changed ? 'equipment.speechEquipped' : 'equipment.speechInfo', {
             name: a.itemName(item)
           }), 14, 46, 122, 34, 12, UI.gold).node.name = 'equipment-speech-title';
@@ -53643,8 +56339,8 @@ System.register("chunks:///_virtual/FirebaseConfig.ts", ['cc'], function (export
   };
 });
 
-System.register("chunks:///_virtual/FoldedSkillUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './Config.ts', './SkillCatalog.ts', './SkillUI.ts', './SoundCues.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, cclegacy, Graphics, UIOpacity, Label, Color, Sprite, SPELLS, tacticIcon, TACTIC_COLORS, tacticHelp, tacticSound;
+System.register("chunks:///_virtual/FoldedSkillUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './Config.ts', './SkillCatalog.ts', './SkillUI.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, cclegacy, Graphics, UIOpacity, Label, Color, Sprite, SPELLS, tacticIcon, TACTIC_COLORS, tacticHelp;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -53662,8 +56358,6 @@ System.register("chunks:///_virtual/FoldedSkillUI.ts", ['./rollupPluginModLoBabe
       TACTIC_COLORS = module.TACTIC_COLORS;
     }, function (module) {
       tacticHelp = module.tacticHelp;
-    }, function (module) {
-      tacticSound = module.tacticSound;
     }],
     execute: function () {
       exports('foldedSkill', foldedSkill);
@@ -53687,15 +56381,7 @@ System.register("chunks:///_virtual/FoldedSkillUI.ts", ['./rollupPluginModLoBabe
         state.outlineWidth = 2;
         state.outlineColor = new Color('#182126');
         a.touchAction(n, function () {
-          var reason = a.spellReason(id);
-          if (reason) {
-            a.denied(n, reason);
-            return;
-          }
-          if (a.game.cast(id)) {
-            a.spark(0, 95, TACTIC_COLORS[id]);
-            a.sound(tacticSound(id));
-          }
+          return a.castSpell(id, n);
         }, tacticHelp(a, id), false, false);
         var key = '';
         return function () {
@@ -54055,6 +56741,8 @@ System.register("chunks:///_virtual/Game.ts", ['./rollupPluginModLoBabelHelpers.
               return Date.now();
             };
           }
+          /** Runtime input marker only; never serialized into account progress. */
+          this.combatActionSerial = 0;
           /** Successful casts only; transient rendering events never enter account saves. */
           this.tacticCasts = [];
           this.s = void 0;
@@ -55717,6 +58405,7 @@ System.register("chunks:///_virtual/Game.ts", ['./rollupPluginModLoBabelHelpers.
             this.notice = 'error.mana';
             return false;
           }
+          this.combatActionSerial++;
           this.tacticCasts.push({
             id: i,
             target: this.targetEnemy(),
@@ -56444,8 +59133,8 @@ System.register("chunks:///_virtual/Game.ts", ['./rollupPluginModLoBabelHelpers.
   };
 });
 
-System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './TacticEffects.ts', './DefeatUI.ts', './CombatRetarget.ts', './EnemyDeathMotion.ts', './EnemyCombatFeedback.ts', './BattleVitalsUI.ts', './FoldedSkillUI.ts', './WeaponGrip.ts', './OverheadHealth.ts', './CampCombatUI.ts', './SoulEnemyArt.ts', './BattlePortal.ts', './EnemyPresentation.ts', './SamStorage.ts', './BeastEffectGuideUI.ts', './FieldInteractionUI.ts', './FieldChests.ts', './MovementDust.ts', './FieldEncounter.ts', './WorldNewsUI.ts', './WeaponEffects.ts', './EnemyDefeatEffects.ts', './TileBattlefield.ts', './BattlefieldMap.ts', './StoryUI.ts', './CampaignUI.ts', './Campaign.ts', './CampaignBattle.ts', './ThreeKingdomsArt.ts', './ReviewPrompt2.ts', './Squad.ts', './WeeklyRankingUI.ts', './TouchImpactUI.ts', './BackgroundMusic.ts', './CaptainRankUI.ts', './FontUI.ts', './PopupIllustrationUI.ts', './ScrollPositionUI.ts', './DroneFleetUI.ts', './BossEntranceUI.ts', './SkillCatalog.ts', './SkillUI.ts', './ExplorationUI.ts', './SkillTrainingUI.ts', './EquipmentUI.ts', './EquipmentDetailUI.ts', './Enemies.ts', './env', './EnemyArtBounds.ts', './RewardClaimUI.ts', './SquadUI.ts', './MercenaryUnlock.ts', './BattlePlacementUI.ts', './BattleTransitionUI.ts', './ShopUI.ts', './RewardGlowUI.ts', './ShopTheme.ts', './MotionBounds.ts', './CombatMotion.ts', './EnemyHitFeedback.ts', './SoundFX.ts', './BattleSoundscape.ts', './SoundCues.ts', './BossEntrance.ts', './Mercenaries.ts', './BattleFormation.ts', './CheatUI.ts', './FeedbackUI.ts', './DroneFeedbackUI.ts', './Game.ts', './Amount.ts', './Config.ts', './I18n.ts', './ExpansionUI.ts', './Monetization.ts', './MonetizationUI.ts', './OperationsClient.ts', './LiveOpsUI.ts', './EntryUI.ts', './TutorialUI.ts', './EntryPolicy.ts', './Online.ts', './FirebaseCloud.ts', './NativeServices.ts', './UITheme.ts'], function (exports) {
-  var _inheritsLoose, _createForOfIteratorHelperLoose, _extends, _asyncToGenerator, _regeneratorRuntime, _createClass, _assertThisInitialized, cclegacy, _decorator, view, input, Input, isValid, KeyCode, Color, Node, Layers, UITransform, Graphics, Label, tween, Vec3, Tween, BlockInputEvents, Mask, UIOpacity, Sprite, ScrollView, resources, Texture2D, SpriteFrame, EditBox, screen, ResolutionPolicy, sys, Component, profiler, TacticEffects, DefeatUI, CombatRetarget, EnemyDeathMotion, tickEnemyCombatFeedback, enemyCombatFeedback, BattleVitalsUI, foldedSkill, weaponGrip, overheadHealthVisible, campTargets, syncCampCombat, SOUL_ENEMY_HIT_POINTS, BattlePortal, enemyFitScale, enemyVisualScale, SamStorage, beastEffectGuide, FieldInteractionUI, fieldChestBlockers, MovementDust, FieldEncounter, bossArrivalPoint, bossPortalPoint, WorldNewsUI, WeaponEffects, EnemyDefeatEffects, TileBattlefield, battlefieldMap, battlefieldNavigation, battlefieldParty, battlefieldZoom, battlefieldCamera, atBattlefieldExit, battlefieldFollowers, StoryUI, campaignRoute, campaignPreviewArt, campaignChapter, campaignText, campaignBattle, MOTION_LAUNCH_POINTS, ReviewPrompt, squadBonuses, SQUAD_TEAMS, SQUAD_LIMIT, squadRole, WeeklyRankingUI, TouchImpactUI, BackgroundMusic, restoreRankView, captainRankEntry, captainCelebration, captainRankGuide, FontUI, popupIllustration, ScrollPositionUI, DroneFleetUI, BossEntranceUI, tacticIcon, tacticManager, tacticDetail, explorationEntry, explorationBoard, skillTree, skillDetail, equipmentDropButton, equipmentListRow, updateEquipmentDropButton, updateEquipmentUnreadBadges, equipmentUnreadBadge, equipmentDetail, armyEnemyType, enemyCategory, enemyDisplayName, EDITOR, DEBUG, ENEMY_HIT_POINTS, RewardClaimUI, SquadUI, mercenaryUnlocked, mercenaryLock, BattlePlacementUI, BattleTransitionUI, ShopUI, RewardGlowUI, SHOP_STYLE, MOTION_LEFT, CombatMotion, enemyHitOffset, EnemyHitFeedback, SoundFX, BATTLE_SOUND_ALIASES, BattleFoley, ACTION_KEY_SOUNDS, BUTTON_CATEGORY_SOUNDS, WEAPON_SOUNDS, tacticSound, battleSoundCues, bossEntrancePending, mercenaryWeapon, attackProfile, mercenaryArt, captainTraining, battlefieldOffset, allyPosition, SOLDIER_SIZE, battleDensityScale, waveSize, bossSize, enemySoldierSize, soldierSize, enemyHPShare, CheatUI, FeedbackUI, DroneFeedbackUI, Game, display, ZERO, ratio, add, fmt, SKILLS, SPELLS, HEROES, ARTIFACTS, CARDS, t, matchesTranslation, ExpansionUI, Monetization, rewardedAdMode, MonetizationUI, OperationsClient, LiveOpsUI, EntryUI, TutorialUI, featureUnlocked, tabUnlocked, replayTutorial, designHeight, TAB_STAGES, Online, FirebaseCloud, FirebaseCommerce, AdMobRewarded, GooglePlayBilling, BUTTON_CATEGORY_KEYS, BUTTON_TONES, contrastInk, ICON_HELP_KEYS, BLOCKED_NOTICE, UI, SQUAD_ROLE_STYLE, UITheme, BUTTON_COMPLETED_KEYS, BUTTON_STATE_TONES;
+System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalogUI.ts', './EquipmentCatalog.ts', './TacticEffects.ts', './DefeatUI.ts', './CombatRetarget.ts', './EnemyDeathMotion.ts', './EnemyCombatFeedback.ts', './BattleVitalsUI.ts', './FoldedSkillUI.ts', './WeaponGrip.ts', './OverheadHealth.ts', './CampCombatUI.ts', './SoulEnemyArt.ts', './BattlePortal.ts', './EnemyPresentation.ts', './SamStorage.ts', './BeastEffectGuideUI.ts', './FieldInteractionUI.ts', './FieldChests.ts', './MovementDust.ts', './FieldEncounter.ts', './WorldNewsUI.ts', './WeaponEffects.ts', './EnemyDefeatEffects.ts', './TileBattlefield.ts', './BattlefieldMap.ts', './StoryUI.ts', './CampaignUI.ts', './Campaign.ts', './CampaignBattle.ts', './ThreeKingdomsArt.ts', './ReviewPrompt2.ts', './Squad.ts', './WeeklyRankingUI.ts', './TouchImpactUI.ts', './BackgroundMusic.ts', './CaptainRankUI.ts', './FontUI.ts', './PopupIllustrationUI.ts', './ScrollPositionUI.ts', './DroneFleetUI.ts', './BossEntranceUI.ts', './SkillCatalog.ts', './SkillUI.ts', './ExplorationUI.ts', './SkillTrainingUI.ts', './EquipmentUI.ts', './EquipmentDetailUI.ts', './Enemies.ts', './env', './EnemyArtBounds.ts', './RewardClaimUI.ts', './SquadUI.ts', './MercenaryUnlock.ts', './BattlePlacementUI.ts', './BattleTransitionUI.ts', './ShopUI.ts', './RewardGlowUI.ts', './ShopTheme.ts', './MotionBounds.ts', './CombatMotion.ts', './EnemyHitFeedback.ts', './SoundFX.ts', './BattleSoundscape.ts', './SoundCues.ts', './BossEntrance.ts', './Mercenaries.ts', './BattleFormation.ts', './CheatUI.ts', './FeedbackUI.ts', './DroneFeedbackUI.ts', './Game.ts', './Amount.ts', './Config.ts', './I18n.ts', './ExpansionUI.ts', './Monetization.ts', './MonetizationUI.ts', './OperationsClient.ts', './LiveOpsUI.ts', './EntryUI.ts', './TutorialUI.ts', './EntryPolicy.ts', './Online.ts', './FirebaseCloud.ts', './NativeServices.ts', './UITheme.ts'], function (exports) {
+  var _inheritsLoose, _createForOfIteratorHelperLoose, _extends, _asyncToGenerator, _regeneratorRuntime, _createClass, _assertThisInitialized, cclegacy, _decorator, view, input, Input, isValid, KeyCode, Color, Node, Layers, UITransform, Graphics, Label, tween, Vec3, Tween, BlockInputEvents, Mask, UIOpacity, Sprite, ScrollView, resources, Texture2D, SpriteFrame, EditBox, screen, ResolutionPolicy, sys, Component, profiler, equipmentCatalog, equipmentName, equipmentPreview, equipmentIcon, equipmentPreviewName, TacticEffects, DefeatUI, CombatRetarget, EnemyDeathMotion, tickEnemyCombatFeedback, enemyCombatFeedback, BattleVitalsUI, foldedSkill, weaponGrip, overheadHealthVisible, campTargets, syncCampCombat, SOUL_ENEMY_HIT_POINTS, BattlePortal, enemyFitScale, enemyVisualScale, SamStorage, beastEffectGuide, FieldInteractionUI, fieldChestBlockers, MovementDust, FieldEncounter, bossArrivalPoint, bossPortalPoint, WorldNewsUI, WeaponEffects, EnemyDefeatEffects, TileBattlefield, battlefieldMap, battlefieldNavigation, battlefieldParty, battlefieldZoom, battlefieldCamera, atBattlefieldExit, battlefieldFollowers, StoryUI, campaignRoute, campaignPreviewArt, campaignChapter, campaignText, campaignBattle, MOTION_LAUNCH_POINTS, ReviewPrompt, squadBonuses, SQUAD_TEAMS, SQUAD_LIMIT, squadRole, WeeklyRankingUI, TouchImpactUI, BackgroundMusic, restoreRankView, captainRankEntry, captainCelebration, captainRankGuide, FontUI, popupIllustration, ScrollPositionUI, DroneFleetUI, BossEntranceUI, TACTIC_COLORS, tacticIcon, tacticManager, tacticDetail, explorationEntry, explorationBoard, skillTree, skillDetail, equipmentDropButton, equipmentListRow, updateEquipmentDropButton, updateEquipmentUnreadBadges, equipmentUnreadBadge, equipmentDetail, armyEnemyType, enemyCategory, enemyDisplayName, EDITOR, DEBUG, ENEMY_HIT_POINTS, RewardClaimUI, SquadUI, mercenaryUnlocked, mercenaryLock, BattlePlacementUI, BattleTransitionUI, ShopUI, RewardGlowUI, SHOP_STYLE, MOTION_LEFT, CombatMotion, enemyHitOffset, EnemyHitFeedback, SoundFX, BATTLE_SOUND_ALIASES, BattleFoley, ACTION_KEY_SOUNDS, BUTTON_CATEGORY_SOUNDS, tacticSound, WEAPON_SOUNDS, battleSoundCues, bossEntrancePending, mercenaryWeapon, attackProfile, mercenaryArt, captainTraining, battlefieldOffset, allyPosition, SOLDIER_SIZE, battleDensityScale, waveSize, bossSize, enemySoldierSize, soldierSize, enemyHPShare, CheatUI, FeedbackUI, DroneFeedbackUI, Game, display, ZERO, ratio, add, fmt, SKILLS, SPELLS, HEROES, ARTIFACTS, CARDS, t, matchesTranslation, ExpansionUI, Monetization, rewardedAdMode, MonetizationUI, OperationsClient, LiveOpsUI, EntryUI, TutorialUI, featureUnlocked, tabUnlocked, replayTutorial, designHeight, TAB_STAGES, Online, FirebaseCloud, FirebaseCommerce, AdMobRewarded, GooglePlayBilling, BUTTON_CATEGORY_KEYS, BUTTON_TONES, contrastInk, ICON_HELP_KEYS, BLOCKED_NOTICE, UI, SQUAD_ROLE_STYLE, UITheme, BUTTON_COMPLETED_KEYS, BUTTON_STATE_TONES;
   return {
     setters: [function (module) {
       _inheritsLoose = module.inheritsLoose;
@@ -56486,6 +59175,13 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
       sys = module.sys;
       Component = module.Component;
       profiler = module.profiler;
+    }, function (module) {
+      equipmentCatalog = module.equipmentCatalog;
+    }, function (module) {
+      equipmentName = module.equipmentName;
+      equipmentPreview = module.equipmentPreview;
+      equipmentIcon = module.equipmentIcon;
+      equipmentPreviewName = module.equipmentPreviewName;
     }, function (module) {
       TacticEffects = module.TacticEffects;
     }, function (module) {
@@ -56586,6 +59282,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
     }, function (module) {
       BossEntranceUI = module.BossEntranceUI;
     }, function (module) {
+      TACTIC_COLORS = module.TACTIC_COLORS;
       tacticIcon = module.tacticIcon;
     }, function (module) {
       tacticManager = module.tacticManager;
@@ -56645,8 +59342,8 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
     }, function (module) {
       ACTION_KEY_SOUNDS = module.ACTION_KEY_SOUNDS;
       BUTTON_CATEGORY_SOUNDS = module.BUTTON_CATEGORY_SOUNDS;
-      WEAPON_SOUNDS = module.WEAPON_SOUNDS;
       tacticSound = module.tacticSound;
+      WEAPON_SOUNDS = module.WEAPON_SOUNDS;
       battleSoundCues = module.battleSoundCues;
     }, function (module) {
       bossEntrancePending = module.bossEntrancePending;
@@ -57369,7 +60066,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
             }
             if (cue) _this4.sound(cue);
             action();
-          }, options.hint || (iconOnly ? text : ''), navigation || options.allowWhileBusy, (_options$reportReward = options.reportRewards) != null ? _options$reportReward : !navigation);
+          }, options.hint || (iconOnly ? text : ''), navigation || options.allowWhileBusy, category !== 'battle' && ((_options$reportReward = options.reportRewards) != null ? _options$reportReward : !navigation));
           (_this$tutorial2 = this.tutorial) == null || _this$tutorial2.register(n, text, options.hint || '', style);
           return n;
         };
@@ -57524,6 +60221,26 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
             owned: currency === 'relics' ? this.formatIntel(owned) : log ? this.format(owned) : display(owned),
             cost: currency === 'relics' ? this.formatIntel(cost) : log ? this.format(cost) : display(cost)
           });
+        }
+        /** One manual cast path for folded controls, the full list, and future callers. */;
+        _proto.castSpell = function castSpell(id, origin) {
+          if (!SPELLS[id]) {
+            this.game.notice = 'error.invalid';
+            this.flushNotice();
+            return false;
+          }
+          var reason = this.spellReason(id);
+          if (reason) {
+            if (origin) this.denied(origin, reason);else this.toast(reason, 'blocked');
+            return false;
+          }
+          if (!this.game.cast(id)) {
+            this.flushNotice();
+            return false;
+          }
+          this.spark(0, 95, TACTIC_COLORS[id]);
+          this.sound(tacticSound(id));
+          return true;
         };
         _proto.spellReason = function spellReason(id) {
           var r = this.game.s.run,
@@ -57640,12 +60357,13 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
               _this7.syncServerWait(0);
               return;
             }
-            var receipt = (_this7$tutorial = _this7.tutorial) == null ? void 0 : _this7$tutorial.beforeAction(n),
+            var combatActionSerial = _this7.game.combatActionSerial,
+              receipt = (_this7$tutorial = _this7.tutorial) == null ? void 0 : _this7$tutorial.beforeAction(n),
               before = reportRewards ? _this7.feedback.snapshot() : null;
             action();
             if (_this7.game.notice) _this7.flushNotice();
             if (receipt) _this7.tutorial.afterAction(receipt);
-            if (before && !_this7.remoteBusy && !_this7.feedback.asyncPending) _this7.feedback.finish(before);
+            if (before && _this7.game.combatActionSerial === combatActionSerial && !_this7.remoteBusy && !_this7.feedback.asyncPending) _this7.feedback.finish(before);
           });
         };
         _proto.metric = function metric(parent, icon, value, x, y, w, hint, height) {
@@ -59806,6 +62524,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
                 var actionButton = _this31.button(card, r.action, w / 2 - 54, 0, 90, 50, r.click || function () {}, !settled && (!_this31.ui.inPopup(card) || !browse), {
                   style: r.buttonStyle || (r.locked ? 'disabled' : settled ? 'selected' : browse ? 'secondary' : 'primary'),
                   category: r.actionCategory,
+                  sound: r.actionSound,
                   completed: r.actionCompleted,
                   fontSize: 18,
                   icon: r.actionIcon,
@@ -60020,6 +62739,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
                   level: sp.unlock
                 }) : _this32.tr('action.cast'),
                 actionCategory: 'battle',
+                actionSound: null,
                 actionLabel: function actionLabel() {
                   return r.master < sp.unlock ? _this32.tr('action.level', {
                     level: sp.unlock
@@ -60034,11 +62754,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
                   return _this32.spellDetail(sp.id, Math.max(0, _this32.game.s.spellSlots.indexOf(sp.id)));
                 },
                 click: function click() {
-                  if (g.cast(sp.id)) {
-                    _this32.spark(0, 95, C.violet);
-                    _this32.sound(tacticSound(sp.id));
-                  }
-                  _this32.flushNotice();
+                  return _this32.castSpell(sp.id);
                 }
               };
             }), {
@@ -60256,7 +62972,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
         };
         _proto.itemName = function itemName(e) {
           return this.tr('equipment.item', {
-            slot: this.tr("slot." + e.slot),
+            slot: equipmentName(e, this.game.s.locale),
             rarity: this.tr("rarity." + e.rarity),
             level: e.level
           });
@@ -60543,11 +63259,20 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
             setId = set != null ? set : Math.floor(part / 5),
             piece = slot != null ? slot : part % 5,
             cost = g.craftCost(setId, piece);
-          var icons = ['equipment:rifle', 'equipment:helmet', 'equipment:vest', 'equipment:radio', 'equipment:rank'],
+          var preview = equipmentPreview(piece, g.s.maxStage),
+            icons = Array.from({
+              length: 5
+            }, function (_, slot) {
+              return equipmentIcon({
+                slot: slot,
+                level: preview.low
+              });
+            }),
             tones = [BUTTON_TONES.battle, BUTTON_TONES.shop, BUTTON_TONES.upgrade, BUTTON_TONES.ascend, BUTTON_TONES.confirm];
           var p = this.open(this.tr('equipment.craft'), 550);
           p.name = 'craft-panel';
-          this.ui.surface(this.nodeAt(p, 'craft-preview', 0, 132, 374, 124), C.panel, 'cut');
+          var previewPanel = this.nodeAt(p, 'craft-preview', 0, 132, 374, 124);
+          this.ui.surface(previewPanel, C.panel, 'cut');
           var portrait = this.nodeAt(p, 'craft-piece-plate', -127, 132, 94, 94);
           this.ui.surface(portrait, tones[piece], 'cut');
           this.ui.icon(this.nodeAt(portrait, 'craft-piece-art', 0, 0, 78, 78), icons[piece]);
@@ -60557,16 +63282,16 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
               state: _this38.tr('equipment.craftTargetState')
             });
           });
-          this.label(p, this.tr('equipment.craftNext'), 36, 174, 228, 22, 15, C.muted, Label.HorizontalAlign.LEFT);
-          this.label(p, this.tr('slot.' + piece), 36, 141, 228, 34, 24, C.text, Label.HorizontalAlign.LEFT).node.name = 'craft-piece-name';
-          this.label(p, this.tr('equipment.craftSetProgress', {
+          this.label(previewPanel, this.tr('equipment.craftNext'), 36, 42, 228, 22, 15, C.muted, Label.HorizontalAlign.LEFT);
+          this.label(previewPanel, equipmentPreviewName(piece, g.s.maxStage, this.game.s.locale), 36, 9, 228, 42, 18, C.text, Label.HorizontalAlign.LEFT).node.name = 'craft-piece-name';
+          this.label(previewPanel, this.tr('equipment.craftSetProgress', {
             name: this.tr('extra.set', {
               id: setId + 1
             }),
             count: g.s.setHistory.filter(function (part) {
               return Math.floor(part / 5) === setId;
             }).length
-          }), 36, 108, 228, 24, 16, C.gold, Label.HorizontalAlign.LEFT).node.name = 'craft-set-progress';
+          }), 36, -24, 228, 24, 16, C.gold, Label.HorizontalAlign.LEFT).node.name = 'craft-set-progress';
           var _loop5 = function _loop5(i) {
             var collected = g.s.setHistory.includes(setId * 5 + i),
               n = _this38.nodeAt(p, 'craft-set-piece-' + i, -148 + i * 74, 31, 68, 90),
@@ -60596,7 +63321,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
           this.modalRefresh = function () {
             owned.getComponentInChildren(Label).string = display(g.s.shards);
           };
-          this.label(p, this.tr(set === undefined ? 'equipment.craftNextHint' : 'equipment.craftChosenHint'), 0, -151, 374, 48, 17, C.muted);
+          this.label(p, (g.s.locale === 'ko' ? '획득 레벨 ' : 'Gear level ') + preview.low + '–' + preview.high + '\n' + (g.s.locale === 'ko' ? '레벨에 맞는 장비 외형 획득' : 'Appearance follows the rolled level'), 0, -151, 374, 48, 17, C.muted);
           this.button(p, this.tr('action.cancel'), -98, -226, 176, 50, function () {
             return _this38.close();
           }, false, {
@@ -61701,7 +64426,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
         };
         _proto.equipmentTools = function equipmentTools() {
           var _this64 = this;
-          var p = this.open(this.tr('nav.equipment'), 460);
+          var p = this.open(this.tr('nav.equipment'), 590);
           [['registry.title', function () {
             return _this64.squadUI.registry();
           }], ['equipment.sets', function () {
@@ -61721,8 +64446,10 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
             });
           }], ['equipment.transmog', function () {
             return _this64.transmog();
+          }], ['equipment.catalog', function () {
+            return equipmentCatalog(_this64);
           }]].forEach(function (v, i) {
-            return _this64.button(p, _this64.tr(v[0]), 0, 114 - i * 96, 375, 60, v[1], false, {
+            return _this64.button(p, _this64.tr(v[0]), 0, 190 - i * 92, 375, 60, v[1], false, {
               unavailable: i === 2 ? function () {
                 return _this64.game.confirmedEquipment().some(function (e) {
                   return !e.locked && !_this64.game.s.equipped.includes(e.id);
@@ -61738,6 +64465,7 @@ System.register("chunks:///_virtual/GameApp.ts", ['./rollupPluginModLoBabelHelpe
             return {
               title: _this65.itemName(e),
               icon: e.slot,
+              art: equipmentIcon(e),
               unavailable: function unavailable() {
                 return _this65.game.s.appearance[e.slot] === e.id ? _this65.tr('action.alreadyApplied') : null;
               },
@@ -62642,11 +65370,13 @@ System.register("chunks:///_virtual/HitPresentation.ts", ['cc'], function (expor
   };
 });
 
-System.register("chunks:///_virtual/I18n.ts", ['cc', './GameBrand.ts'], function (exports) {
-  var cclegacy, applyGameBranding;
+System.register("chunks:///_virtual/I18n.ts", ['cc', './DivineBeasts.ts', './GameBrand.ts'], function (exports) {
+  var cclegacy, applyBeastTrainingText, applyGameBranding;
   return {
     setters: [function (module) {
       cclegacy = module.cclegacy;
+    }, function (module) {
+      applyBeastTrainingText = module.applyBeastTrainingText;
     }, function (module) {
       applyGameBranding = module.applyGameBranding;
     }],
@@ -67551,6 +70281,13 @@ System.register("chunks:///_virtual/I18n.ts", ['cc', './GameBrand.ts'], function
         "tactic.short.8": "Stones",
         "tactic.short.9": "Caravan"
       });
+      applyBeastTrainingText(translations);
+
+      // Slot IDs stay unchanged; the fifth part now includes historical accessories.
+      translations.ko['slot.4'] = '장신구';
+      translations.en['slot.4'] = 'Accessory';
+      translations.ko['equipment.catalog'] = '장비 200종';
+      translations.en['equipment.catalog'] = '200 Equipment Designs';
       cclegacy._RF.pop();
     }
   };
@@ -68786,9 +71523,9 @@ System.register("chunks:///_virtual/MailUI.ts", ['cc', './UITheme.ts'], function
   };
 });
 
-System.register("chunks:///_virtual/main", ['./ArmyTroopsUI.ts', './BackgroundMusic.ts', './BattlePlacementUI.ts', './BattlePortal.ts', './BattleTransitionUI.ts', './BattleVitalsUI.ts', './BeastEffectGuideUI.ts', './BossEntranceUI.ts', './BossTimerUI.ts', './BrandSplashUI.ts', './CampCombatUI.ts', './CampaignUI.ts', './CaptainRankUI.ts', './CheatUI.ts', './CombatMotion.ts', './DefeatUI.ts', './DischargeIcon.ts', './DroneFeedbackUI.ts', './DroneFleetUI.ts', './EnemyCombatFeedback.ts', './EnemyDeathMotion.ts', './EnemyDefeatEffects.ts', './EnemyHitFeedback.ts', './EntryUI.ts', './EquipmentDetailUI.ts', './EquipmentUI.ts', './ExpansionUI.ts', './ExplorationUI.ts', './FeedbackUI.ts', './FieldChestArt.ts', './FieldInteractionUI.ts', './FirebaseCloud.ts', './FirebaseConfig.ts', './FoldedSkillUI.ts', './FontUI.ts', './GameApp.ts', './LiveOpsUI.ts', './MailUI.ts', './MercenaryDetailUI.ts', './MonetizationUI.ts', './MovementDust.ts', './NativeServices.ts', './OperationsClient.ts', './PackedUIArt.ts', './PopupIllustrationUI.ts', './PushNotifications.ts', './ReviewPrompt2.ts', './RewardArtUI.ts', './RewardClaimUI.ts', './RewardContentsUI.ts', './RewardGlowUI.ts', './ScrollPositionUI.ts', './ShopTheme.ts', './ShopUI.ts', './SkillIconArt.ts', './SkillTrainingUI.ts', './SkillUI.ts', './SoundFX.ts', './SpeechIllustrationUI.ts', './SquadUI.ts', './StoryUI.ts', './TacticDetailUI.ts', './TacticEffects.ts', './TacticSpriteArt.ts', './TapWarAuthConfig.ts', './TileBattlefield.ts', './TitleUI.ts', './TouchImpactUI.ts', './TutorialUI.ts', './UITheme.ts', './WeaponEffects.ts', './WeeklyRankingUI.ts', './WorldNewsUI.ts', './AccountReset.ts', './ActorBuffs.ts', './AllyBody.ts', './AllyPlacement.ts', './Amount.ts', './AreaTransition.ts', './ArenaSpawns.ts', './ArmyRoster.ts', './AttackGeometry.ts', './AttackPriority.ts', './AttackTiming.ts', './Balance.ts', './BattleApproach.ts', './BattleFormation.ts', './BattleNavigation.ts', './BattleSoundscape.ts', './BattleSurvival.ts', './BattleTactics.ts', './BattlefieldMap.ts', './BattlefieldTerrain.ts', './BossEntrance.ts', './BrandSplash.ts', './BridgeTiles.ts', './CameraFollow.ts', './CampWaves.ts', './Campaign.ts', './CampaignBattle.ts', './CampaignEnemies.ts', './CaptainRankArt.ts', './CaptainRanks.ts', './CombatBalance.ts', './CombatRetarget.ts', './Config.ts', './DamageIcon.ts', './Dialogue.ts', './DischargeText.ts', './DivineBeasts.ts', './DownedArt.ts', './DownedPresentation.ts', './DroneEffects.ts', './DroneFleet.ts', './Enemies.ts', './EnemyArtBounds.ts', './EnemyPacking.ts', './EnemyPresentation.ts', './EnemyReinforcements.ts', './EntryPolicy.ts', './Expansion.ts', './FeatureLessons.ts', './Feedback.ts', './FieldChests.ts', './FieldEncounter.ts', './Game.ts', './GameBrand.ts', './HitPresentation.ts', './I18n.ts', './LessonCopy.ts', './LiveOps.ts', './Mercenaries.ts', './MercenaryUnlock.ts', './Monetization.ts', './MotionBounds.ts', './MusicShuffle.ts', './NinjaRunArt.ts', './Online.ts', './Operations.ts', './OverheadHealth.ts', './PrototypeCheats.ts', './ReferenceRules.ts', './ReviewPrompt.ts', './RewardClaims.ts', './SamStorage.ts', './SkillCatalog.ts', './SkillText.ts', './SoulAllyArt.ts', './SoulAllyMotion.ts', './SoulEnemyArt.ts', './SoulPortraitArt.ts', './SoundCues.ts', './SpeechArtBounds.ts', './SpeechPlacement.ts', './Squad.ts', './SquadName.ts', './Storyline.ts', './TerrainPropLayers.ts', './TerrainTileCatalog.ts', './ThreeKingdomsArt.ts', './TileNavigation.ts', './TitleArtBounds.ts', './TitleCast.ts', './TitleLogoArt.ts', './UIFontCatalog.ts', './WarriorRunArt.ts', './WeaponEffectCatalog.ts', './WeaponGrip.ts', './WeeklyRanking.ts', './WorldNews.ts', './WorldNotices.ts', './firebase-sdk.js'], function () {
+System.register("chunks:///_virtual/main", ['./ArmyTroopsUI.ts', './BackgroundMusic.ts', './BattlePlacementUI.ts', './BattlePortal.ts', './BattleTransitionUI.ts', './BattleVitalsUI.ts', './BeastEffectGuideUI.ts', './BossEntranceUI.ts', './BossTimerUI.ts', './BrandSplashUI.ts', './CampCombatUI.ts', './CampaignUI.ts', './CaptainRankUI.ts', './CheatUI.ts', './CombatMotion.ts', './DefeatUI.ts', './DischargeIcon.ts', './DroneFeedbackUI.ts', './DroneFleetUI.ts', './EnemyCombatFeedback.ts', './EnemyDeathMotion.ts', './EnemyDefeatEffects.ts', './EnemyHitFeedback.ts', './EntryUI.ts', './EquipmentCatalogUI.ts', './EquipmentDetailUI.ts', './EquipmentUI.ts', './ExpansionUI.ts', './ExplorationUI.ts', './FeedbackUI.ts', './FieldChestArt.ts', './FieldInteractionUI.ts', './FirebaseCloud.ts', './FirebaseConfig.ts', './FoldedSkillUI.ts', './FontUI.ts', './GameApp.ts', './LiveOpsUI.ts', './MailUI.ts', './MercenaryDetailUI.ts', './MonetizationUI.ts', './MovementDust.ts', './NativeServices.ts', './OperationsClient.ts', './PackedUIArt.ts', './PopupIllustrationUI.ts', './PushNotifications.ts', './ReviewPrompt2.ts', './RewardArtUI.ts', './RewardClaimUI.ts', './RewardContentsUI.ts', './RewardGlowUI.ts', './ScrollPositionUI.ts', './ShopTheme.ts', './ShopUI.ts', './SkillIconArt.ts', './SkillTrainingUI.ts', './SkillUI.ts', './SoundFX.ts', './SpeechIllustrationUI.ts', './SquadUI.ts', './StoryUI.ts', './TacticDetailUI.ts', './TacticEffects.ts', './TacticSpriteArt.ts', './TapWarAuthConfig.ts', './TileBattlefield.ts', './TitleUI.ts', './TouchImpactUI.ts', './TutorialUI.ts', './UITheme.ts', './WeaponEffects.ts', './WeeklyRankingUI.ts', './WorldNewsUI.ts', './AccountReset.ts', './ActorBuffs.ts', './AllyBody.ts', './AllyPlacement.ts', './Amount.ts', './AreaTransition.ts', './ArenaSpawns.ts', './ArmyRoster.ts', './AttackGeometry.ts', './AttackPriority.ts', './AttackTiming.ts', './Balance.ts', './BattleApproach.ts', './BattleFormation.ts', './BattleNavigation.ts', './BattleSoundscape.ts', './BattleSurvival.ts', './BattleTactics.ts', './BattlefieldMap.ts', './BattlefieldTerrain.ts', './BossEntrance.ts', './BrandSplash.ts', './BridgeTiles.ts', './CameraFollow.ts', './CampWaves.ts', './Campaign.ts', './CampaignBattle.ts', './CampaignEnemies.ts', './CaptainRankArt.ts', './CaptainRanks.ts', './CombatBalance.ts', './CombatRetarget.ts', './Config.ts', './DamageIcon.ts', './Dialogue.ts', './DischargeText.ts', './DivineBeasts.ts', './DownedArt.ts', './DownedPresentation.ts', './DroneEffects.ts', './DroneFleet.ts', './Enemies.ts', './EnemyArtBounds.ts', './EnemyPacking.ts', './EnemyPresentation.ts', './EnemyReinforcements.ts', './EntryPolicy.ts', './EquipmentArt.ts', './EquipmentCatalog.ts', './Expansion.ts', './FeatureLessons.ts', './Feedback.ts', './FieldChests.ts', './FieldEncounter.ts', './Game.ts', './GameBrand.ts', './HitPresentation.ts', './I18n.ts', './LessonCopy.ts', './LiveOps.ts', './Mercenaries.ts', './MercenaryUnlock.ts', './Monetization.ts', './MotionBounds.ts', './MusicShuffle.ts', './NinjaRunArt.ts', './Online.ts', './Operations.ts', './OverheadHealth.ts', './PrototypeCheats.ts', './ReferenceRules.ts', './ReviewPrompt.ts', './RewardClaims.ts', './SamStorage.ts', './SkillCatalog.ts', './SkillText.ts', './SmoothRunArt.ts', './SoulAllyArt.ts', './SoulAllyMotion.ts', './SoulEnemyArt.ts', './SoulPortraitArt.ts', './SoulRunPresentation.ts', './SoundCues.ts', './SpeechArtBounds.ts', './SpeechPlacement.ts', './Squad.ts', './SquadName.ts', './Storyline.ts', './TerrainPropLayers.ts', './TerrainTileCatalog.ts', './ThreeKingdomsArt.ts', './TileNavigation.ts', './TitleArtBounds.ts', './TitleCast.ts', './TitleLogoArt.ts', './UIFontCatalog.ts', './WarriorRunArt.ts', './WeaponEffectCatalog.ts', './WeaponGrip.ts', './WeeklyRanking.ts', './WorldNews.ts', './WorldNotices.ts', './firebase-sdk.js'], function () {
   return {
-    setters: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
+    setters: [null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null],
     execute: function () {}
   };
 });
@@ -75245,8 +77982,8 @@ System.register("chunks:///_virtual/RewardClaimUI.ts", ['./rollupPluginModLoBabe
   };
 });
 
-System.register("chunks:///_virtual/RewardContentsUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './RewardClaims.ts', './Amount.ts', './UITheme.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, cclegacy, UITransform, Label, REWARD_CURRENCIES, REWARD_COLLECTIONS, display, mul, UI;
+System.register("chunks:///_virtual/RewardContentsUI.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentCatalog.ts', './RewardClaims.ts', './Amount.ts', './UITheme.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, cclegacy, UITransform, Label, equipmentName, equipmentIcon, REWARD_CURRENCIES, REWARD_COLLECTIONS, display, mul, UI;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -75254,6 +77991,9 @@ System.register("chunks:///_virtual/RewardContentsUI.ts", ['./rollupPluginModLoB
       cclegacy = module.cclegacy;
       UITransform = module.UITransform;
       Label = module.Label;
+    }, function (module) {
+      equipmentName = module.equipmentName;
+      equipmentIcon = module.equipmentIcon;
     }, function (module) {
       REWARD_CURRENCIES = module.REWARD_CURRENCIES;
       REWARD_COLLECTIONS = module.REWARD_COLLECTIONS;
@@ -75337,7 +78077,14 @@ System.register("chunks:///_virtual/RewardContentsUI.ts", ['./rollupPluginModLoB
         for (var _iterator3 = _createForOfIteratorHelperLoose(REWARD_COLLECTIONS), _step3; !(_step3 = _iterator3()).done;) {
           _loop();
         }
-        if ((_bundle$equipment = bundle.equipment) != null && _bundle$equipment.length) add('equipment', display(bundle.equipment.length * multiplier), true);
+        (_bundle$equipment = bundle.equipment) == null || _bundle$equipment.forEach(function (item) {
+          return entries.push({
+            key: 'equipment',
+            name: equipmentName(item, a.game.s.locale) + ' · Lv.' + item.level,
+            value: display(multiplier),
+            icon: equipmentIcon(item)
+          });
+        });
         if (bundle.mana) add('mana', display(bundle.mana * multiplier), true);
         return entries;
       }
@@ -75366,7 +78113,7 @@ System.register("chunks:///_virtual/RewardContentsUI.ts", ['./rollupPluginModLoB
               var iconX = -width / 2 + 24,
                 textX = 24,
                 textWidth = width - 60;
-              a.ui.icon(a.nodeAt(row, 'reward-content-icon', iconX, 0, 34, 34), REWARD_ICONS[entry.key]);
+              a.ui.icon(a.nodeAt(row, 'reward-content-icon', iconX, 0, 34, 34), entry.icon || REWARD_ICONS[entry.key]);
               a.label(row, entry.name, textX, 11, textWidth, 20, 13, '#d5c2a0', Label.HorizontalAlign.LEFT).node.name = 'reward-content-name';
               a.label(row, (owned ? '' : '＋') + entry.value, textX, -10, textWidth, 24, 20, '#fff0c0', Label.HorizontalAlign.LEFT).node.name = 'reward-content-quantity';
             }
@@ -77412,6 +80159,520 @@ System.register("chunks:///_virtual/SkillUI.ts", ['cc', './TacticDetailUI.ts', '
           return a.skills(false);
         }).name = 'skill-back';
       }
+      cclegacy._RF.pop();
+    }
+  };
+});
+
+System.register("chunks:///_virtual/SmoothRunArt.ts", ['cc'], function (exports) {
+  var cclegacy;
+  return {
+    setters: [function (module) {
+      cclegacy = module.cclegacy;
+    }],
+    execute: function () {
+      cclegacy._RF.push({}, "9faaeaMF+FbTqa/QZ/045zO", "SmoothRunArt", undefined);
+      // Whole Chrome-generated run poses: captain and all30 warriors, saved IDs unchanged.
+      var SMOOTH_RUN_ART = exports('SMOOTH_RUN_ART', {
+        "ui/military/soul-run/2/0": ["ui/three-kingdoms/zhang-yi-run", 2, 2, 448, 192],
+        "ui/military/soul-run/2/1": ["ui/three-kingdoms/zhang-yi-run", 454, 2, 448, 192],
+        "ui/military/soul-run/2/2": ["ui/three-kingdoms/zhang-yi-run", 906, 2, 448, 192],
+        "ui/military/soul-run/2/3": ["ui/three-kingdoms/zhang-yi-run", 1358, 2, 448, 192],
+        "ui/military/soul-run/2/4": ["ui/three-kingdoms/zhang-yi-run", 2, 198, 448, 192],
+        "ui/military/soul-run/2/5": ["ui/three-kingdoms/zhang-yi-run", 454, 198, 448, 192],
+        "ui/military/soul-run/2/6": ["ui/three-kingdoms/zhang-yi-run", 906, 198, 448, 192],
+        "ui/military/soul-run/2/7": ["ui/three-kingdoms/zhang-yi-run", 1358, 198, 448, 192],
+        "ui/military/soul-run/-1/0": ["ui/three-kingdoms/ally-runs-0", 2, 2, 288, 192],
+        "ui/military/soul-run/-1/1": ["ui/three-kingdoms/ally-runs-0", 294, 2, 288, 192],
+        "ui/military/soul-run/-1/2": ["ui/three-kingdoms/ally-runs-0", 586, 2, 288, 192],
+        "ui/military/soul-run/-1/3": ["ui/three-kingdoms/ally-runs-0", 878, 2, 288, 192],
+        "ui/military/soul-run/-1/4": ["ui/three-kingdoms/ally-runs-0", 1170, 2, 288, 192],
+        "ui/military/soul-run/-1/5": ["ui/three-kingdoms/ally-runs-0", 1462, 2, 288, 192],
+        "ui/military/soul-run/-1/6": ["ui/three-kingdoms/ally-runs-0", 1754, 2, 288, 192],
+        "ui/military/soul-run/-1/7": ["ui/three-kingdoms/ally-runs-0", 2, 198, 288, 192],
+        "ui/military/soul-run/0/0": ["ui/three-kingdoms/ally-runs-0", 294, 198, 288, 192],
+        "ui/military/soul-run/0/1": ["ui/three-kingdoms/ally-runs-0", 586, 198, 288, 192],
+        "ui/military/soul-run/0/2": ["ui/three-kingdoms/ally-runs-0", 878, 198, 288, 192],
+        "ui/military/soul-run/0/3": ["ui/three-kingdoms/ally-runs-0", 1170, 198, 288, 192],
+        "ui/military/soul-run/0/4": ["ui/three-kingdoms/ally-runs-0", 1462, 198, 288, 192],
+        "ui/military/soul-run/0/5": ["ui/three-kingdoms/ally-runs-0", 1754, 198, 288, 192],
+        "ui/military/soul-run/0/6": ["ui/three-kingdoms/ally-runs-0", 2, 394, 288, 192],
+        "ui/military/soul-run/0/7": ["ui/three-kingdoms/ally-runs-0", 294, 394, 288, 192],
+        "ui/military/soul-run/1/0": ["ui/three-kingdoms/ally-runs-0", 586, 394, 288, 192],
+        "ui/military/soul-run/1/1": ["ui/three-kingdoms/ally-runs-0", 878, 394, 288, 192],
+        "ui/military/soul-run/1/2": ["ui/three-kingdoms/ally-runs-0", 1170, 394, 288, 192],
+        "ui/military/soul-run/1/3": ["ui/three-kingdoms/ally-runs-0", 1462, 394, 288, 192],
+        "ui/military/soul-run/1/4": ["ui/three-kingdoms/ally-runs-0", 1754, 394, 288, 192],
+        "ui/military/soul-run/1/5": ["ui/three-kingdoms/ally-runs-0", 2, 590, 288, 192],
+        "ui/military/soul-run/1/6": ["ui/three-kingdoms/ally-runs-0", 294, 590, 288, 192],
+        "ui/military/soul-run/1/7": ["ui/three-kingdoms/ally-runs-0", 586, 590, 288, 192],
+        "ui/military/soul-run/3/0": ["ui/three-kingdoms/ally-runs-0", 878, 590, 288, 192],
+        "ui/military/soul-run/3/1": ["ui/three-kingdoms/ally-runs-0", 1170, 590, 288, 192],
+        "ui/military/soul-run/3/2": ["ui/three-kingdoms/ally-runs-0", 1462, 590, 288, 192],
+        "ui/military/soul-run/3/3": ["ui/three-kingdoms/ally-runs-0", 1754, 590, 288, 192],
+        "ui/military/soul-run/3/4": ["ui/three-kingdoms/ally-runs-0", 2, 786, 288, 192],
+        "ui/military/soul-run/3/5": ["ui/three-kingdoms/ally-runs-0", 294, 786, 288, 192],
+        "ui/military/soul-run/3/6": ["ui/three-kingdoms/ally-runs-0", 586, 786, 288, 192],
+        "ui/military/soul-run/3/7": ["ui/three-kingdoms/ally-runs-0", 878, 786, 288, 192],
+        "ui/military/soul-run/4/0": ["ui/three-kingdoms/ally-runs-0", 1170, 786, 288, 192],
+        "ui/military/soul-run/4/1": ["ui/three-kingdoms/ally-runs-0", 1462, 786, 288, 192],
+        "ui/military/soul-run/4/2": ["ui/three-kingdoms/ally-runs-0", 1754, 786, 288, 192],
+        "ui/military/soul-run/4/3": ["ui/three-kingdoms/ally-runs-0", 2, 982, 288, 192],
+        "ui/military/soul-run/4/4": ["ui/three-kingdoms/ally-runs-0", 294, 982, 288, 192],
+        "ui/military/soul-run/4/5": ["ui/three-kingdoms/ally-runs-0", 586, 982, 288, 192],
+        "ui/military/soul-run/4/6": ["ui/three-kingdoms/ally-runs-0", 878, 982, 288, 192],
+        "ui/military/soul-run/4/7": ["ui/three-kingdoms/ally-runs-0", 1170, 982, 288, 192],
+        "ui/military/soul-run/5/0": ["ui/three-kingdoms/ally-runs-0", 1462, 982, 288, 192],
+        "ui/military/soul-run/5/1": ["ui/three-kingdoms/ally-runs-0", 1754, 982, 288, 192],
+        "ui/military/soul-run/5/2": ["ui/three-kingdoms/ally-runs-0", 2, 1178, 288, 192],
+        "ui/military/soul-run/5/3": ["ui/three-kingdoms/ally-runs-0", 294, 1178, 288, 192],
+        "ui/military/soul-run/5/4": ["ui/three-kingdoms/ally-runs-0", 586, 1178, 288, 192],
+        "ui/military/soul-run/5/5": ["ui/three-kingdoms/ally-runs-0", 878, 1178, 288, 192],
+        "ui/military/soul-run/5/6": ["ui/three-kingdoms/ally-runs-0", 1170, 1178, 288, 192],
+        "ui/military/soul-run/5/7": ["ui/three-kingdoms/ally-runs-0", 1462, 1178, 288, 192],
+        "ui/military/soul-run/6/0": ["ui/three-kingdoms/ally-runs-0", 1754, 1178, 288, 192],
+        "ui/military/soul-run/6/1": ["ui/three-kingdoms/ally-runs-0", 2, 1374, 288, 192],
+        "ui/military/soul-run/6/2": ["ui/three-kingdoms/ally-runs-0", 294, 1374, 288, 192],
+        "ui/military/soul-run/6/3": ["ui/three-kingdoms/ally-runs-0", 586, 1374, 288, 192],
+        "ui/military/soul-run/6/4": ["ui/three-kingdoms/ally-runs-0", 878, 1374, 288, 192],
+        "ui/military/soul-run/6/5": ["ui/three-kingdoms/ally-runs-0", 1170, 1374, 288, 192],
+        "ui/military/soul-run/6/6": ["ui/three-kingdoms/ally-runs-0", 1462, 1374, 288, 192],
+        "ui/military/soul-run/6/7": ["ui/three-kingdoms/ally-runs-0", 1754, 1374, 288, 192],
+        "ui/military/soul-run/7/0": ["ui/three-kingdoms/ally-runs-0", 2, 1570, 288, 192],
+        "ui/military/soul-run/7/1": ["ui/three-kingdoms/ally-runs-0", 294, 1570, 288, 192],
+        "ui/military/soul-run/7/2": ["ui/three-kingdoms/ally-runs-0", 586, 1570, 288, 192],
+        "ui/military/soul-run/7/3": ["ui/three-kingdoms/ally-runs-0", 878, 1570, 288, 192],
+        "ui/military/soul-run/7/4": ["ui/three-kingdoms/ally-runs-0", 1170, 1570, 288, 192],
+        "ui/military/soul-run/7/5": ["ui/three-kingdoms/ally-runs-0", 1462, 1570, 288, 192],
+        "ui/military/soul-run/7/6": ["ui/three-kingdoms/ally-runs-0", 1754, 1570, 288, 192],
+        "ui/military/soul-run/7/7": ["ui/three-kingdoms/ally-runs-0", 2, 1766, 288, 192],
+        "ui/military/soul-run/8/0": ["ui/three-kingdoms/ally-runs-0", 294, 1766, 288, 192],
+        "ui/military/soul-run/8/1": ["ui/three-kingdoms/ally-runs-0", 586, 1766, 288, 192],
+        "ui/military/soul-run/8/2": ["ui/three-kingdoms/ally-runs-0", 878, 1766, 288, 192],
+        "ui/military/soul-run/8/3": ["ui/three-kingdoms/ally-runs-0", 1170, 1766, 288, 192],
+        "ui/military/soul-run/8/4": ["ui/three-kingdoms/ally-runs-0", 1462, 1766, 288, 192],
+        "ui/military/soul-run/8/5": ["ui/three-kingdoms/ally-runs-0", 1754, 1766, 288, 192],
+        "ui/military/soul-run/8/6": ["ui/three-kingdoms/ally-runs-1", 2, 2, 288, 192],
+        "ui/military/soul-run/8/7": ["ui/three-kingdoms/ally-runs-1", 294, 2, 288, 192],
+        "ui/military/soul-run/9/0": ["ui/three-kingdoms/ally-runs-1", 586, 2, 288, 192],
+        "ui/military/soul-run/9/1": ["ui/three-kingdoms/ally-runs-1", 878, 2, 288, 192],
+        "ui/military/soul-run/9/2": ["ui/three-kingdoms/ally-runs-1", 1170, 2, 288, 192],
+        "ui/military/soul-run/9/3": ["ui/three-kingdoms/ally-runs-1", 1462, 2, 288, 192],
+        "ui/military/soul-run/9/4": ["ui/three-kingdoms/ally-runs-1", 1754, 2, 288, 192],
+        "ui/military/soul-run/9/5": ["ui/three-kingdoms/ally-runs-1", 2, 198, 288, 192],
+        "ui/military/soul-run/9/6": ["ui/three-kingdoms/ally-runs-1", 294, 198, 288, 192],
+        "ui/military/soul-run/9/7": ["ui/three-kingdoms/ally-runs-1", 586, 198, 288, 192],
+        "ui/military/soul-run/10/0": ["ui/three-kingdoms/ally-runs-1", 878, 198, 288, 192],
+        "ui/military/soul-run/10/1": ["ui/three-kingdoms/ally-runs-1", 1170, 198, 288, 192],
+        "ui/military/soul-run/10/2": ["ui/three-kingdoms/ally-runs-1", 1462, 198, 288, 192],
+        "ui/military/soul-run/10/3": ["ui/three-kingdoms/ally-runs-1", 1754, 198, 288, 192],
+        "ui/military/soul-run/10/4": ["ui/three-kingdoms/ally-runs-1", 2, 394, 288, 192],
+        "ui/military/soul-run/10/5": ["ui/three-kingdoms/ally-runs-1", 294, 394, 288, 192],
+        "ui/military/soul-run/10/6": ["ui/three-kingdoms/ally-runs-1", 586, 394, 288, 192],
+        "ui/military/soul-run/10/7": ["ui/three-kingdoms/ally-runs-1", 878, 394, 288, 192],
+        "ui/military/soul-run/11/0": ["ui/three-kingdoms/ally-runs-1", 1170, 394, 288, 192],
+        "ui/military/soul-run/11/1": ["ui/three-kingdoms/ally-runs-1", 1462, 394, 288, 192],
+        "ui/military/soul-run/11/2": ["ui/three-kingdoms/ally-runs-1", 1754, 394, 288, 192],
+        "ui/military/soul-run/11/3": ["ui/three-kingdoms/ally-runs-1", 2, 590, 288, 192],
+        "ui/military/soul-run/11/4": ["ui/three-kingdoms/ally-runs-1", 294, 590, 288, 192],
+        "ui/military/soul-run/11/5": ["ui/three-kingdoms/ally-runs-1", 586, 590, 288, 192],
+        "ui/military/soul-run/11/6": ["ui/three-kingdoms/ally-runs-1", 878, 590, 288, 192],
+        "ui/military/soul-run/11/7": ["ui/three-kingdoms/ally-runs-1", 1170, 590, 288, 192],
+        "ui/military/soul-run/12/0": ["ui/three-kingdoms/ally-runs-1", 1462, 590, 288, 192],
+        "ui/military/soul-run/12/1": ["ui/three-kingdoms/ally-runs-1", 1754, 590, 288, 192],
+        "ui/military/soul-run/12/2": ["ui/three-kingdoms/ally-runs-1", 2, 786, 288, 192],
+        "ui/military/soul-run/12/3": ["ui/three-kingdoms/ally-runs-1", 294, 786, 288, 192],
+        "ui/military/soul-run/12/4": ["ui/three-kingdoms/ally-runs-1", 586, 786, 288, 192],
+        "ui/military/soul-run/12/5": ["ui/three-kingdoms/ally-runs-1", 878, 786, 288, 192],
+        "ui/military/soul-run/12/6": ["ui/three-kingdoms/ally-runs-1", 1170, 786, 288, 192],
+        "ui/military/soul-run/12/7": ["ui/three-kingdoms/ally-runs-1", 1462, 786, 288, 192],
+        "ui/military/soul-run/13/0": ["ui/three-kingdoms/ally-runs-1", 1754, 786, 288, 192],
+        "ui/military/soul-run/13/1": ["ui/three-kingdoms/ally-runs-1", 2, 982, 288, 192],
+        "ui/military/soul-run/13/2": ["ui/three-kingdoms/ally-runs-1", 294, 982, 288, 192],
+        "ui/military/soul-run/13/3": ["ui/three-kingdoms/ally-runs-1", 586, 982, 288, 192],
+        "ui/military/soul-run/13/4": ["ui/three-kingdoms/ally-runs-1", 878, 982, 288, 192],
+        "ui/military/soul-run/13/5": ["ui/three-kingdoms/ally-runs-1", 1170, 982, 288, 192],
+        "ui/military/soul-run/13/6": ["ui/three-kingdoms/ally-runs-1", 1462, 982, 288, 192],
+        "ui/military/soul-run/13/7": ["ui/three-kingdoms/ally-runs-1", 1754, 982, 288, 192],
+        "ui/military/soul-run/14/0": ["ui/three-kingdoms/ally-runs-1", 2, 1178, 288, 192],
+        "ui/military/soul-run/14/1": ["ui/three-kingdoms/ally-runs-1", 294, 1178, 288, 192],
+        "ui/military/soul-run/14/2": ["ui/three-kingdoms/ally-runs-1", 586, 1178, 288, 192],
+        "ui/military/soul-run/14/3": ["ui/three-kingdoms/ally-runs-1", 878, 1178, 288, 192],
+        "ui/military/soul-run/14/4": ["ui/three-kingdoms/ally-runs-1", 1170, 1178, 288, 192],
+        "ui/military/soul-run/14/5": ["ui/three-kingdoms/ally-runs-1", 1462, 1178, 288, 192],
+        "ui/military/soul-run/14/6": ["ui/three-kingdoms/ally-runs-1", 1754, 1178, 288, 192],
+        "ui/military/soul-run/14/7": ["ui/three-kingdoms/ally-runs-1", 2, 1374, 288, 192],
+        "ui/military/soul-run/15/0": ["ui/three-kingdoms/ally-runs-1", 294, 1374, 288, 192],
+        "ui/military/soul-run/15/1": ["ui/three-kingdoms/ally-runs-1", 586, 1374, 288, 192],
+        "ui/military/soul-run/15/2": ["ui/three-kingdoms/ally-runs-1", 878, 1374, 288, 192],
+        "ui/military/soul-run/15/3": ["ui/three-kingdoms/ally-runs-1", 1170, 1374, 288, 192],
+        "ui/military/soul-run/15/4": ["ui/three-kingdoms/ally-runs-1", 1462, 1374, 288, 192],
+        "ui/military/soul-run/15/5": ["ui/three-kingdoms/ally-runs-1", 1754, 1374, 288, 192],
+        "ui/military/soul-run/15/6": ["ui/three-kingdoms/ally-runs-1", 2, 1570, 288, 192],
+        "ui/military/soul-run/15/7": ["ui/three-kingdoms/ally-runs-1", 294, 1570, 288, 192],
+        "ui/military/soul-run/16/0": ["ui/three-kingdoms/ally-runs-1", 586, 1570, 288, 192],
+        "ui/military/soul-run/16/1": ["ui/three-kingdoms/ally-runs-1", 878, 1570, 288, 192],
+        "ui/military/soul-run/16/2": ["ui/three-kingdoms/ally-runs-1", 1170, 1570, 288, 192],
+        "ui/military/soul-run/16/3": ["ui/three-kingdoms/ally-runs-1", 1462, 1570, 288, 192],
+        "ui/military/soul-run/16/4": ["ui/three-kingdoms/ally-runs-1", 1754, 1570, 288, 192],
+        "ui/military/soul-run/16/5": ["ui/three-kingdoms/ally-runs-1", 2, 1766, 288, 192],
+        "ui/military/soul-run/16/6": ["ui/three-kingdoms/ally-runs-1", 294, 1766, 288, 192],
+        "ui/military/soul-run/16/7": ["ui/three-kingdoms/ally-runs-1", 586, 1766, 288, 192],
+        "ui/military/soul-run/17/0": ["ui/three-kingdoms/ally-runs-1", 878, 1766, 288, 192],
+        "ui/military/soul-run/17/1": ["ui/three-kingdoms/ally-runs-1", 1170, 1766, 288, 192],
+        "ui/military/soul-run/17/2": ["ui/three-kingdoms/ally-runs-1", 1462, 1766, 288, 192],
+        "ui/military/soul-run/17/3": ["ui/three-kingdoms/ally-runs-1", 1754, 1766, 288, 192],
+        "ui/military/soul-run/17/4": ["ui/three-kingdoms/ally-runs-2", 2, 2, 288, 192],
+        "ui/military/soul-run/17/5": ["ui/three-kingdoms/ally-runs-2", 294, 2, 288, 192],
+        "ui/military/soul-run/17/6": ["ui/three-kingdoms/ally-runs-2", 586, 2, 288, 192],
+        "ui/military/soul-run/17/7": ["ui/three-kingdoms/ally-runs-2", 878, 2, 288, 192],
+        "ui/military/soul-run/18/0": ["ui/three-kingdoms/ally-runs-2", 1170, 2, 288, 192],
+        "ui/military/soul-run/18/1": ["ui/three-kingdoms/ally-runs-2", 1462, 2, 288, 192],
+        "ui/military/soul-run/18/2": ["ui/three-kingdoms/ally-runs-2", 1754, 2, 288, 192],
+        "ui/military/soul-run/18/3": ["ui/three-kingdoms/ally-runs-2", 2, 198, 288, 192],
+        "ui/military/soul-run/18/4": ["ui/three-kingdoms/ally-runs-2", 294, 198, 288, 192],
+        "ui/military/soul-run/18/5": ["ui/three-kingdoms/ally-runs-2", 586, 198, 288, 192],
+        "ui/military/soul-run/18/6": ["ui/three-kingdoms/ally-runs-2", 878, 198, 288, 192],
+        "ui/military/soul-run/18/7": ["ui/three-kingdoms/ally-runs-2", 1170, 198, 288, 192],
+        "ui/military/soul-run/19/0": ["ui/three-kingdoms/ally-runs-2", 1462, 198, 288, 192],
+        "ui/military/soul-run/19/1": ["ui/three-kingdoms/ally-runs-2", 1754, 198, 288, 192],
+        "ui/military/soul-run/19/2": ["ui/three-kingdoms/ally-runs-2", 2, 394, 288, 192],
+        "ui/military/soul-run/19/3": ["ui/three-kingdoms/ally-runs-2", 294, 394, 288, 192],
+        "ui/military/soul-run/19/4": ["ui/three-kingdoms/ally-runs-2", 586, 394, 288, 192],
+        "ui/military/soul-run/19/5": ["ui/three-kingdoms/ally-runs-2", 878, 394, 288, 192],
+        "ui/military/soul-run/19/6": ["ui/three-kingdoms/ally-runs-2", 1170, 394, 288, 192],
+        "ui/military/soul-run/19/7": ["ui/three-kingdoms/ally-runs-2", 1462, 394, 288, 192],
+        "ui/military/soul-run/20/0": ["ui/three-kingdoms/ally-runs-2", 1754, 394, 288, 192],
+        "ui/military/soul-run/20/1": ["ui/three-kingdoms/ally-runs-2", 2, 590, 288, 192],
+        "ui/military/soul-run/20/2": ["ui/three-kingdoms/ally-runs-2", 294, 590, 288, 192],
+        "ui/military/soul-run/20/3": ["ui/three-kingdoms/ally-runs-2", 586, 590, 288, 192],
+        "ui/military/soul-run/20/4": ["ui/three-kingdoms/ally-runs-2", 878, 590, 288, 192],
+        "ui/military/soul-run/20/5": ["ui/three-kingdoms/ally-runs-2", 1170, 590, 288, 192],
+        "ui/military/soul-run/20/6": ["ui/three-kingdoms/ally-runs-2", 1462, 590, 288, 192],
+        "ui/military/soul-run/20/7": ["ui/three-kingdoms/ally-runs-2", 1754, 590, 288, 192],
+        "ui/military/soul-run/21/0": ["ui/three-kingdoms/ally-runs-2", 2, 786, 288, 192],
+        "ui/military/soul-run/21/1": ["ui/three-kingdoms/ally-runs-2", 294, 786, 288, 192],
+        "ui/military/soul-run/21/2": ["ui/three-kingdoms/ally-runs-2", 586, 786, 288, 192],
+        "ui/military/soul-run/21/3": ["ui/three-kingdoms/ally-runs-2", 878, 786, 288, 192],
+        "ui/military/soul-run/21/4": ["ui/three-kingdoms/ally-runs-2", 1170, 786, 288, 192],
+        "ui/military/soul-run/21/5": ["ui/three-kingdoms/ally-runs-2", 1462, 786, 288, 192],
+        "ui/military/soul-run/21/6": ["ui/three-kingdoms/ally-runs-2", 1754, 786, 288, 192],
+        "ui/military/soul-run/21/7": ["ui/three-kingdoms/ally-runs-2", 2, 982, 288, 192],
+        "ui/military/soul-run/22/0": ["ui/three-kingdoms/ally-runs-2", 294, 982, 288, 192],
+        "ui/military/soul-run/22/1": ["ui/three-kingdoms/ally-runs-2", 586, 982, 288, 192],
+        "ui/military/soul-run/22/2": ["ui/three-kingdoms/ally-runs-2", 878, 982, 288, 192],
+        "ui/military/soul-run/22/3": ["ui/three-kingdoms/ally-runs-2", 1170, 982, 288, 192],
+        "ui/military/soul-run/22/4": ["ui/three-kingdoms/ally-runs-2", 1462, 982, 288, 192],
+        "ui/military/soul-run/22/5": ["ui/three-kingdoms/ally-runs-2", 1754, 982, 288, 192],
+        "ui/military/soul-run/22/6": ["ui/three-kingdoms/ally-runs-2", 2, 1178, 288, 192],
+        "ui/military/soul-run/22/7": ["ui/three-kingdoms/ally-runs-2", 294, 1178, 288, 192],
+        "ui/military/soul-run/23/0": ["ui/three-kingdoms/ally-runs-2", 586, 1178, 288, 192],
+        "ui/military/soul-run/23/1": ["ui/three-kingdoms/ally-runs-2", 878, 1178, 288, 192],
+        "ui/military/soul-run/23/2": ["ui/three-kingdoms/ally-runs-2", 1170, 1178, 288, 192],
+        "ui/military/soul-run/23/3": ["ui/three-kingdoms/ally-runs-2", 1462, 1178, 288, 192],
+        "ui/military/soul-run/23/4": ["ui/three-kingdoms/ally-runs-2", 1754, 1178, 288, 192],
+        "ui/military/soul-run/23/5": ["ui/three-kingdoms/ally-runs-2", 2, 1374, 288, 192],
+        "ui/military/soul-run/23/6": ["ui/three-kingdoms/ally-runs-2", 294, 1374, 288, 192],
+        "ui/military/soul-run/23/7": ["ui/three-kingdoms/ally-runs-2", 586, 1374, 288, 192],
+        "ui/military/soul-run/24/0": ["ui/three-kingdoms/ally-runs-2", 878, 1374, 288, 192],
+        "ui/military/soul-run/24/1": ["ui/three-kingdoms/ally-runs-2", 1170, 1374, 288, 192],
+        "ui/military/soul-run/24/2": ["ui/three-kingdoms/ally-runs-2", 1462, 1374, 288, 192],
+        "ui/military/soul-run/24/3": ["ui/three-kingdoms/ally-runs-2", 1754, 1374, 288, 192],
+        "ui/military/soul-run/24/4": ["ui/three-kingdoms/ally-runs-2", 2, 1570, 288, 192],
+        "ui/military/soul-run/24/5": ["ui/three-kingdoms/ally-runs-2", 294, 1570, 288, 192],
+        "ui/military/soul-run/24/6": ["ui/three-kingdoms/ally-runs-2", 586, 1570, 288, 192],
+        "ui/military/soul-run/24/7": ["ui/three-kingdoms/ally-runs-2", 878, 1570, 288, 192],
+        "ui/military/soul-run/25/0": ["ui/three-kingdoms/ally-runs-2", 1170, 1570, 288, 192],
+        "ui/military/soul-run/25/1": ["ui/three-kingdoms/ally-runs-2", 1462, 1570, 288, 192],
+        "ui/military/soul-run/25/2": ["ui/three-kingdoms/ally-runs-2", 1754, 1570, 288, 192],
+        "ui/military/soul-run/25/3": ["ui/three-kingdoms/ally-runs-2", 2, 1766, 288, 192],
+        "ui/military/soul-run/25/4": ["ui/three-kingdoms/ally-runs-2", 294, 1766, 288, 192],
+        "ui/military/soul-run/25/5": ["ui/three-kingdoms/ally-runs-2", 586, 1766, 288, 192],
+        "ui/military/soul-run/25/6": ["ui/three-kingdoms/ally-runs-2", 878, 1766, 288, 192],
+        "ui/military/soul-run/25/7": ["ui/three-kingdoms/ally-runs-2", 1170, 1766, 288, 192],
+        "ui/military/soul-run/26/0": ["ui/three-kingdoms/ally-runs-2", 1462, 1766, 288, 192],
+        "ui/military/soul-run/26/1": ["ui/three-kingdoms/ally-runs-2", 1754, 1766, 288, 192],
+        "ui/military/soul-run/26/2": ["ui/three-kingdoms/ally-runs-3", 2, 2, 288, 192],
+        "ui/military/soul-run/26/3": ["ui/three-kingdoms/ally-runs-3", 294, 2, 288, 192],
+        "ui/military/soul-run/26/4": ["ui/three-kingdoms/ally-runs-3", 586, 2, 288, 192],
+        "ui/military/soul-run/26/5": ["ui/three-kingdoms/ally-runs-3", 878, 2, 288, 192],
+        "ui/military/soul-run/26/6": ["ui/three-kingdoms/ally-runs-3", 1170, 2, 288, 192],
+        "ui/military/soul-run/26/7": ["ui/three-kingdoms/ally-runs-3", 1462, 2, 288, 192],
+        "ui/military/soul-run/27/0": ["ui/three-kingdoms/ally-runs-3", 1754, 2, 288, 192],
+        "ui/military/soul-run/27/1": ["ui/three-kingdoms/ally-runs-3", 2, 198, 288, 192],
+        "ui/military/soul-run/27/2": ["ui/three-kingdoms/ally-runs-3", 294, 198, 288, 192],
+        "ui/military/soul-run/27/3": ["ui/three-kingdoms/ally-runs-3", 586, 198, 288, 192],
+        "ui/military/soul-run/27/4": ["ui/three-kingdoms/ally-runs-3", 878, 198, 288, 192],
+        "ui/military/soul-run/27/5": ["ui/three-kingdoms/ally-runs-3", 1170, 198, 288, 192],
+        "ui/military/soul-run/27/6": ["ui/three-kingdoms/ally-runs-3", 1462, 198, 288, 192],
+        "ui/military/soul-run/27/7": ["ui/three-kingdoms/ally-runs-3", 1754, 198, 288, 192],
+        "ui/military/soul-run/28/0": ["ui/three-kingdoms/ally-runs-3", 2, 394, 288, 192],
+        "ui/military/soul-run/28/1": ["ui/three-kingdoms/ally-runs-3", 294, 394, 288, 192],
+        "ui/military/soul-run/28/2": ["ui/three-kingdoms/ally-runs-3", 586, 394, 288, 192],
+        "ui/military/soul-run/28/3": ["ui/three-kingdoms/ally-runs-3", 878, 394, 288, 192],
+        "ui/military/soul-run/28/4": ["ui/three-kingdoms/ally-runs-3", 1170, 394, 288, 192],
+        "ui/military/soul-run/28/5": ["ui/three-kingdoms/ally-runs-3", 1462, 394, 288, 192],
+        "ui/military/soul-run/28/6": ["ui/three-kingdoms/ally-runs-3", 1754, 394, 288, 192],
+        "ui/military/soul-run/28/7": ["ui/three-kingdoms/ally-runs-3", 2, 590, 288, 192],
+        "ui/military/soul-run/29/0": ["ui/three-kingdoms/ally-runs-3", 294, 590, 288, 192],
+        "ui/military/soul-run/29/1": ["ui/three-kingdoms/ally-runs-3", 586, 590, 288, 192],
+        "ui/military/soul-run/29/2": ["ui/three-kingdoms/ally-runs-3", 878, 590, 288, 192],
+        "ui/military/soul-run/29/3": ["ui/three-kingdoms/ally-runs-3", 1170, 590, 288, 192],
+        "ui/military/soul-run/29/4": ["ui/three-kingdoms/ally-runs-3", 1462, 590, 288, 192],
+        "ui/military/soul-run/29/5": ["ui/three-kingdoms/ally-runs-3", 1754, 590, 288, 192],
+        "ui/military/soul-run/29/6": ["ui/three-kingdoms/ally-runs-3", 2, 786, 288, 192],
+        "ui/military/soul-run/29/7": ["ui/three-kingdoms/ally-runs-3", 294, 786, 288, 192]
+      });
+      var SMOOTH_RUN_BOUNDS = exports('SMOOTH_RUN_BOUNDS', {
+        "ui/military/soul-run/2/0": [0.21651785714285715, 0.13541666666666666, 0.6116071428571429, 0.9635416666666666],
+        "ui/military/soul-run/2/1": [0.21651785714285715, 0.13541666666666666, 0.6116071428571429, 0.9635416666666666],
+        "ui/military/soul-run/2/2": [0.22321428571428573, 0.13541666666666666, 0.6116071428571429, 0.96875],
+        "ui/military/soul-run/2/3": [0.21428571428571427, 0.13541666666666666, 0.6116071428571429, 0.96875],
+        "ui/military/soul-run/2/4": [0.20758928571428573, 0.13541666666666666, 0.6116071428571429, 0.953125],
+        "ui/military/soul-run/2/5": [0.21651785714285715, 0.13541666666666666, 0.6138392857142857, 0.953125],
+        "ui/military/soul-run/2/6": [0.21875, 0.13020833333333334, 0.6116071428571429, 0.953125],
+        "ui/military/soul-run/2/7": [0.203125, 0.140625, 0.6138392857142857, 0.9583333333333334],
+        "ui/military/soul-run/-1/0": [0.09027777777777778, 0.15104166666666666, 0.6805555555555556, 0.9635416666666666],
+        "ui/military/soul-run/-1/1": [0.0763888888888889, 0.140625, 0.6736111111111112, 0.9583333333333334],
+        "ui/military/soul-run/-1/2": [0.08680555555555555, 0.140625, 0.6840277777777778, 0.9583333333333334],
+        "ui/military/soul-run/-1/3": [0.0798611111111111, 0.14583333333333334, 0.6909722222222222, 0.9479166666666666],
+        "ui/military/soul-run/-1/4": [0.06597222222222222, 0.14583333333333334, 0.6944444444444444, 0.953125],
+        "ui/military/soul-run/-1/5": [0.059027777777777776, 0.140625, 0.6770833333333334, 0.9375],
+        "ui/military/soul-run/-1/6": [0.0798611111111111, 0.14583333333333334, 0.6875, 0.96875],
+        "ui/military/soul-run/-1/7": [0.059027777777777776, 0.125, 0.6736111111111112, 0.9583333333333334],
+        "ui/military/soul-run/0/0": [0.1111111111111111, 0.140625, 0.6493055555555556, 0.9635416666666666],
+        "ui/military/soul-run/0/1": [0.10416666666666667, 0.140625, 0.6770833333333334, 0.96875],
+        "ui/military/soul-run/0/2": [0.10416666666666667, 0.140625, 0.6597222222222222, 0.953125],
+        "ui/military/soul-run/0/3": [0.09375, 0.15104166666666666, 0.6527777777777778, 0.953125],
+        "ui/military/soul-run/0/4": [0.09722222222222222, 0.13541666666666666, 0.6666666666666666, 0.9635416666666666],
+        "ui/military/soul-run/0/5": [0.11805555555555555, 0.14583333333333334, 0.65625, 0.9479166666666666],
+        "ui/military/soul-run/0/6": [0.1111111111111111, 0.140625, 0.65625, 0.9375],
+        "ui/military/soul-run/0/7": [0.09027777777777778, 0.14583333333333334, 0.6631944444444444, 0.9479166666666666],
+        "ui/military/soul-run/1/0": [0.1527777777777778, 0.10416666666666667, 0.6493055555555556, 0.921875],
+        "ui/military/soul-run/1/1": [0.12152777777777778, 0.13020833333333334, 0.6215277777777778, 0.9375],
+        "ui/military/soul-run/1/2": [0.09027777777777778, 0.15104166666666666, 0.5833333333333334, 0.953125],
+        "ui/military/soul-run/1/3": [0.11458333333333333, 0.125, 0.6111111111111112, 0.9375],
+        "ui/military/soul-run/1/4": [0.1388888888888889, 0.11979166666666667, 0.6076388888888888, 0.953125],
+        "ui/military/soul-run/1/5": [0.10416666666666667, 0.15104166666666666, 0.5833333333333334, 0.96875],
+        "ui/military/soul-run/1/6": [0.125, 0.125, 0.6041666666666666, 0.953125],
+        "ui/military/soul-run/1/7": [0.14930555555555555, 0.11979166666666667, 0.6145833333333334, 0.9479166666666666],
+        "ui/military/soul-run/3/0": [0.041666666666666664, 0.140625, 0.625, 0.96875],
+        "ui/military/soul-run/3/1": [0.06944444444444445, 0.140625, 0.625, 0.953125],
+        "ui/military/soul-run/3/2": [0.06944444444444445, 0.13541666666666666, 0.6145833333333334, 0.9583333333333334],
+        "ui/military/soul-run/3/3": [0.05555555555555555, 0.140625, 0.6354166666666666, 0.96875],
+        "ui/military/soul-run/3/4": [0.06944444444444445, 0.13541666666666666, 0.5972222222222222, 0.9635416666666666],
+        "ui/military/soul-run/3/5": [0.041666666666666664, 0.13541666666666666, 0.625, 0.9427083333333334],
+        "ui/military/soul-run/3/6": [0.07291666666666667, 0.13541666666666666, 0.5902777777777778, 0.96875],
+        "ui/military/soul-run/3/7": [0.06597222222222222, 0.140625, 0.6041666666666666, 0.953125],
+        "ui/military/soul-run/4/0": [0.09027777777777778, 0.14583333333333334, 0.59375, 0.9635416666666666],
+        "ui/military/soul-run/4/1": [0.0798611111111111, 0.140625, 0.5902777777777778, 0.96875],
+        "ui/military/soul-run/4/2": [0.09027777777777778, 0.13541666666666666, 0.5833333333333334, 0.9635416666666666],
+        "ui/military/soul-run/4/3": [0.07291666666666667, 0.13541666666666666, 0.5972222222222222, 0.9479166666666666],
+        "ui/military/soul-run/4/4": [0.0763888888888889, 0.13541666666666666, 0.59375, 0.953125],
+        "ui/military/soul-run/4/5": [0.08680555555555555, 0.140625, 0.5902777777777778, 0.9479166666666666],
+        "ui/military/soul-run/4/6": [0.08680555555555555, 0.140625, 0.5972222222222222, 0.953125],
+        "ui/military/soul-run/4/7": [0.0625, 0.13541666666666666, 0.59375, 0.9479166666666666],
+        "ui/military/soul-run/5/0": [0.08680555555555555, 0.14583333333333334, 0.75, 0.9375],
+        "ui/military/soul-run/5/1": [0.08680555555555555, 0.13541666666666666, 0.7534722222222222, 0.9583333333333334],
+        "ui/military/soul-run/5/2": [0.08333333333333333, 0.13541666666666666, 0.7465277777777778, 0.96875],
+        "ui/military/soul-run/5/3": [0.07291666666666667, 0.13020833333333334, 0.7534722222222222, 0.953125],
+        "ui/military/soul-run/5/4": [0.09027777777777778, 0.13541666666666666, 0.7326388888888888, 0.9479166666666666],
+        "ui/military/soul-run/5/5": [0.08680555555555555, 0.15104166666666666, 0.7222222222222222, 0.9635416666666666],
+        "ui/military/soul-run/5/6": [0.08680555555555555, 0.14583333333333334, 0.7430555555555556, 0.921875],
+        "ui/military/soul-run/5/7": [0.06597222222222222, 0.14583333333333334, 0.7048611111111112, 0.9635416666666666],
+        "ui/military/soul-run/6/0": [0.1284722222222222, 0.13541666666666666, 0.6215277777777778, 0.9375],
+        "ui/military/soul-run/6/1": [0.125, 0.11458333333333333, 0.6180555555555556, 0.9479166666666666],
+        "ui/military/soul-run/6/2": [0.125, 0.16145833333333334, 0.65625, 0.96875],
+        "ui/military/soul-run/6/3": [0.125, 0.15104166666666666, 0.6527777777777778, 0.9479166666666666],
+        "ui/military/soul-run/6/4": [0.12152777777777778, 0.140625, 0.6215277777777778, 0.9427083333333334],
+        "ui/military/soul-run/6/5": [0.125, 0.14583333333333334, 0.625, 0.9479166666666666],
+        "ui/military/soul-run/6/6": [0.1111111111111111, 0.140625, 0.6180555555555556, 0.9427083333333334],
+        "ui/military/soul-run/6/7": [0.12152777777777778, 0.140625, 0.6319444444444444, 0.9479166666666666],
+        "ui/military/soul-run/7/0": [0.1111111111111111, 0.13541666666666666, 0.6805555555555556, 0.9427083333333334],
+        "ui/military/soul-run/7/1": [0.1111111111111111, 0.13541666666666666, 0.65625, 0.9583333333333334],
+        "ui/military/soul-run/7/2": [0.1111111111111111, 0.13020833333333334, 0.6875, 0.96875],
+        "ui/military/soul-run/7/3": [0.10416666666666667, 0.13020833333333334, 0.6736111111111112, 0.9479166666666666],
+        "ui/military/soul-run/7/4": [0.09722222222222222, 0.13020833333333334, 0.6736111111111112, 0.9479166666666666],
+        "ui/military/soul-run/7/5": [0.125, 0.13541666666666666, 0.6597222222222222, 0.953125],
+        "ui/military/soul-run/7/6": [0.09375, 0.13541666666666666, 0.6701388888888888, 0.9635416666666666],
+        "ui/military/soul-run/7/7": [0.09722222222222222, 0.140625, 0.6805555555555556, 0.9479166666666666],
+        "ui/military/soul-run/8/0": [0.1076388888888889, 0.140625, 0.6354166666666666, 0.96875],
+        "ui/military/soul-run/8/1": [0.11458333333333333, 0.140625, 0.6319444444444444, 0.96875],
+        "ui/military/soul-run/8/2": [0.09027777777777778, 0.14583333333333334, 0.6354166666666666, 0.9635416666666666],
+        "ui/military/soul-run/8/3": [0.0798611111111111, 0.15104166666666666, 0.6354166666666666, 0.96875],
+        "ui/military/soul-run/8/4": [0.11458333333333333, 0.140625, 0.6319444444444444, 0.9635416666666666],
+        "ui/military/soul-run/8/5": [0.08680555555555555, 0.14583333333333334, 0.6284722222222222, 0.9635416666666666],
+        "ui/military/soul-run/8/6": [0.09027777777777778, 0.140625, 0.6319444444444444, 0.9635416666666666],
+        "ui/military/soul-run/8/7": [0.10069444444444445, 0.14583333333333334, 0.6319444444444444, 0.9635416666666666],
+        "ui/military/soul-run/9/0": [0.10069444444444445, 0.13541666666666666, 0.6979166666666666, 0.96875],
+        "ui/military/soul-run/9/1": [0.10069444444444445, 0.14583333333333334, 0.6840277777777778, 0.953125],
+        "ui/military/soul-run/9/2": [0.09722222222222222, 0.14583333333333334, 0.6805555555555556, 0.953125],
+        "ui/military/soul-run/9/3": [0.10416666666666667, 0.15104166666666666, 0.6840277777777778, 0.9583333333333334],
+        "ui/military/soul-run/9/4": [0.10069444444444445, 0.14583333333333334, 0.6875, 0.953125],
+        "ui/military/soul-run/9/5": [0.10069444444444445, 0.14583333333333334, 0.6805555555555556, 0.953125],
+        "ui/military/soul-run/9/6": [0.10069444444444445, 0.14583333333333334, 0.6805555555555556, 0.953125],
+        "ui/military/soul-run/9/7": [0.10069444444444445, 0.13541666666666666, 0.6805555555555556, 0.9583333333333334],
+        "ui/military/soul-run/10/0": [0.12152777777777778, 0.13541666666666666, 0.6701388888888888, 0.9635416666666666],
+        "ui/military/soul-run/10/1": [0.11458333333333333, 0.13541666666666666, 0.6631944444444444, 0.96875],
+        "ui/military/soul-run/10/2": [0.10416666666666667, 0.13541666666666666, 0.6597222222222222, 0.96875],
+        "ui/military/soul-run/10/3": [0.11458333333333333, 0.13541666666666666, 0.6631944444444444, 0.96875],
+        "ui/military/soul-run/10/4": [0.10416666666666667, 0.13541666666666666, 0.6597222222222222, 0.9635416666666666],
+        "ui/military/soul-run/10/5": [0.09027777777777778, 0.13541666666666666, 0.65625, 0.96875],
+        "ui/military/soul-run/10/6": [0.1076388888888889, 0.13541666666666666, 0.6597222222222222, 0.96875],
+        "ui/military/soul-run/10/7": [0.11458333333333333, 0.13541666666666666, 0.6597222222222222, 0.9427083333333334],
+        "ui/military/soul-run/11/0": [0.13194444444444445, 0.11979166666666667, 0.6909722222222222, 0.953125],
+        "ui/military/soul-run/11/1": [0.1388888888888889, 0.11979166666666667, 0.6875, 0.953125],
+        "ui/military/soul-run/11/2": [0.13194444444444445, 0.109375, 0.6770833333333334, 0.9166666666666666],
+        "ui/military/soul-run/11/3": [0.13541666666666666, 0.11458333333333333, 0.6875, 0.921875],
+        "ui/military/soul-run/11/4": [0.13541666666666666, 0.13541666666666666, 0.6875, 0.96875],
+        "ui/military/soul-run/11/5": [0.11805555555555555, 0.109375, 0.6805555555555556, 0.9166666666666666],
+        "ui/military/soul-run/11/6": [0.125, 0.11979166666666667, 0.6770833333333334, 0.9427083333333334],
+        "ui/military/soul-run/11/7": [0.1388888888888889, 0.109375, 0.6875, 0.9166666666666666],
+        "ui/military/soul-run/12/0": [0.06944444444444445, 0.140625, 0.6319444444444444, 0.953125],
+        "ui/military/soul-run/12/1": [0.0798611111111111, 0.14583333333333334, 0.625, 0.9583333333333334],
+        "ui/military/soul-run/12/2": [0.07291666666666667, 0.140625, 0.6354166666666666, 0.9583333333333334],
+        "ui/military/soul-run/12/3": [0.0763888888888889, 0.14583333333333334, 0.6180555555555556, 0.9583333333333334],
+        "ui/military/soul-run/12/4": [0.09722222222222222, 0.140625, 0.6215277777777778, 0.9583333333333334],
+        "ui/military/soul-run/12/5": [0.0763888888888889, 0.13020833333333334, 0.6354166666666666, 0.9583333333333334],
+        "ui/military/soul-run/12/6": [0.09027777777777778, 0.140625, 0.6215277777777778, 0.96875],
+        "ui/military/soul-run/12/7": [0.06944444444444445, 0.140625, 0.6180555555555556, 0.9583333333333334],
+        "ui/military/soul-run/13/0": [0.0798611111111111, 0.140625, 0.625, 0.9322916666666666],
+        "ui/military/soul-run/13/1": [0.06597222222222222, 0.13541666666666666, 0.6180555555555556, 0.9479166666666666],
+        "ui/military/soul-run/13/2": [0.06944444444444445, 0.13541666666666666, 0.6111111111111112, 0.953125],
+        "ui/military/soul-run/13/3": [0.059027777777777776, 0.13541666666666666, 0.6076388888888888, 0.96875],
+        "ui/military/soul-run/13/4": [0.06944444444444445, 0.140625, 0.6111111111111112, 0.96875],
+        "ui/military/soul-run/13/5": [0.06597222222222222, 0.140625, 0.6145833333333334, 0.953125],
+        "ui/military/soul-run/13/6": [0.0625, 0.140625, 0.6111111111111112, 0.96875],
+        "ui/military/soul-run/13/7": [0.0763888888888889, 0.13541666666666666, 0.6111111111111112, 0.9583333333333334],
+        "ui/military/soul-run/14/0": [0.06597222222222222, 0.140625, 0.6423611111111112, 0.9635416666666666],
+        "ui/military/soul-run/14/1": [0.0798611111111111, 0.14583333333333334, 0.6319444444444444, 0.9375],
+        "ui/military/soul-run/14/2": [0.0798611111111111, 0.140625, 0.6111111111111112, 0.953125],
+        "ui/military/soul-run/14/3": [0.06597222222222222, 0.13541666666666666, 0.625, 0.9635416666666666],
+        "ui/military/soul-run/14/4": [0.08333333333333333, 0.13541666666666666, 0.6354166666666666, 0.953125],
+        "ui/military/soul-run/14/5": [0.0763888888888889, 0.13541666666666666, 0.6284722222222222, 0.9635416666666666],
+        "ui/military/soul-run/14/6": [0.0763888888888889, 0.14583333333333334, 0.625, 0.9635416666666666],
+        "ui/military/soul-run/14/7": [0.07291666666666667, 0.140625, 0.6215277777777778, 0.96875],
+        "ui/military/soul-run/15/0": [0.08333333333333333, 0.125, 0.6909722222222222, 0.9479166666666666],
+        "ui/military/soul-run/15/1": [0.09375, 0.13020833333333334, 0.6909722222222222, 0.9583333333333334],
+        "ui/military/soul-run/15/2": [0.08680555555555555, 0.13541666666666666, 0.6979166666666666, 0.9635416666666666],
+        "ui/military/soul-run/15/3": [0.09027777777777778, 0.14583333333333334, 0.7013888888888888, 0.9583333333333334],
+        "ui/military/soul-run/15/4": [0.09722222222222222, 0.13020833333333334, 0.6909722222222222, 0.9583333333333334],
+        "ui/military/soul-run/15/5": [0.0763888888888889, 0.13541666666666666, 0.6909722222222222, 0.9635416666666666],
+        "ui/military/soul-run/15/6": [0.09375, 0.140625, 0.6909722222222222, 0.96875],
+        "ui/military/soul-run/15/7": [0.0798611111111111, 0.13541666666666666, 0.7013888888888888, 0.9635416666666666],
+        "ui/military/soul-run/16/0": [0.18055555555555555, 0.13541666666666666, 0.5729166666666666, 0.9375],
+        "ui/military/soul-run/16/1": [0.1736111111111111, 0.140625, 0.5729166666666666, 0.9427083333333334],
+        "ui/military/soul-run/16/2": [0.17708333333333334, 0.140625, 0.5694444444444444, 0.9427083333333334],
+        "ui/military/soul-run/16/3": [0.16319444444444445, 0.140625, 0.5694444444444444, 0.9635416666666666],
+        "ui/military/soul-run/16/4": [0.16666666666666666, 0.140625, 0.5729166666666666, 0.96875],
+        "ui/military/soul-run/16/5": [0.16666666666666666, 0.140625, 0.5729166666666666, 0.953125],
+        "ui/military/soul-run/16/6": [0.17708333333333334, 0.14583333333333334, 0.5763888888888888, 0.9583333333333334],
+        "ui/military/soul-run/16/7": [0.1527777777777778, 0.140625, 0.5694444444444444, 0.9479166666666666],
+        "ui/military/soul-run/17/0": [0.10069444444444445, 0.15625, 0.65625, 0.953125],
+        "ui/military/soul-run/17/1": [0.09375, 0.171875, 0.6666666666666666, 0.9583333333333334],
+        "ui/military/soul-run/17/2": [0.09375, 0.15625, 0.6666666666666666, 0.9635416666666666],
+        "ui/military/soul-run/17/3": [0.1076388888888889, 0.16666666666666666, 0.6770833333333334, 0.9479166666666666],
+        "ui/military/soul-run/17/4": [0.10069444444444445, 0.16666666666666666, 0.6770833333333334, 0.9583333333333334],
+        "ui/military/soul-run/17/5": [0.08680555555555555, 0.171875, 0.6736111111111112, 0.96875],
+        "ui/military/soul-run/17/6": [0.10416666666666667, 0.16666666666666666, 0.6631944444444444, 0.9583333333333334],
+        "ui/military/soul-run/17/7": [0.10069444444444445, 0.16145833333333334, 0.6666666666666666, 0.9583333333333334],
+        "ui/military/soul-run/18/0": [0.13541666666666666, 0.13541666666666666, 0.5833333333333334, 0.9479166666666666],
+        "ui/military/soul-run/18/1": [0.125, 0.13541666666666666, 0.5798611111111112, 0.9479166666666666],
+        "ui/military/soul-run/18/2": [0.1388888888888889, 0.13541666666666666, 0.5902777777777778, 0.953125],
+        "ui/military/soul-run/18/3": [0.125, 0.13541666666666666, 0.5833333333333334, 0.953125],
+        "ui/military/soul-run/18/4": [0.13194444444444445, 0.140625, 0.5798611111111112, 0.96875],
+        "ui/military/soul-run/18/5": [0.1284722222222222, 0.14583333333333334, 0.5833333333333334, 0.96875],
+        "ui/military/soul-run/18/6": [0.125, 0.13541666666666666, 0.5763888888888888, 0.96875],
+        "ui/military/soul-run/18/7": [0.13194444444444445, 0.15104166666666666, 0.5902777777777778, 0.9583333333333334],
+        "ui/military/soul-run/19/0": [0.059027777777777776, 0.140625, 0.6701388888888888, 0.9635416666666666],
+        "ui/military/soul-run/19/1": [0.0763888888888889, 0.16145833333333334, 0.6770833333333334, 0.96875],
+        "ui/military/soul-run/19/2": [0.07291666666666667, 0.15104166666666666, 0.6701388888888888, 0.953125],
+        "ui/military/soul-run/19/3": [0.0798611111111111, 0.15625, 0.6631944444444444, 0.9583333333333334],
+        "ui/military/soul-run/19/4": [0.0625, 0.15625, 0.6666666666666666, 0.9635416666666666],
+        "ui/military/soul-run/19/5": [0.06944444444444445, 0.15625, 0.6770833333333334, 0.9635416666666666],
+        "ui/military/soul-run/19/6": [0.06597222222222222, 0.15104166666666666, 0.6736111111111112, 0.9583333333333334],
+        "ui/military/soul-run/19/7": [0.0798611111111111, 0.16145833333333334, 0.6701388888888888, 0.9583333333333334],
+        "ui/military/soul-run/20/0": [0.10416666666666667, 0.13020833333333334, 0.5868055555555556, 0.9479166666666666],
+        "ui/military/soul-run/20/1": [0.09027777777777778, 0.13020833333333334, 0.5798611111111112, 0.9479166666666666],
+        "ui/military/soul-run/20/2": [0.11458333333333333, 0.13020833333333334, 0.5833333333333334, 0.9479166666666666],
+        "ui/military/soul-run/20/3": [0.10416666666666667, 0.13541666666666666, 0.5972222222222222, 0.9635416666666666],
+        "ui/military/soul-run/20/4": [0.10069444444444445, 0.13541666666666666, 0.5902777777777778, 0.953125],
+        "ui/military/soul-run/20/5": [0.10416666666666667, 0.13541666666666666, 0.5972222222222222, 0.9583333333333334],
+        "ui/military/soul-run/20/6": [0.10069444444444445, 0.13541666666666666, 0.5798611111111112, 0.96875],
+        "ui/military/soul-run/20/7": [0.12152777777777778, 0.109375, 0.6076388888888888, 0.9270833333333334],
+        "ui/military/soul-run/21/0": [0.15625, 0.15104166666666666, 0.6111111111111112, 0.9479166666666666],
+        "ui/military/soul-run/21/1": [0.15625, 0.140625, 0.6145833333333334, 0.96875],
+        "ui/military/soul-run/21/2": [0.1423611111111111, 0.140625, 0.6076388888888888, 0.9583333333333334],
+        "ui/military/soul-run/21/3": [0.1597222222222222, 0.15104166666666666, 0.6076388888888888, 0.9583333333333334],
+        "ui/military/soul-run/21/4": [0.1527777777777778, 0.15104166666666666, 0.6076388888888888, 0.9427083333333334],
+        "ui/military/soul-run/21/5": [0.1388888888888889, 0.140625, 0.6111111111111112, 0.9583333333333334],
+        "ui/military/soul-run/21/6": [0.15625, 0.13541666666666666, 0.6111111111111112, 0.96875],
+        "ui/military/soul-run/21/7": [0.1597222222222222, 0.140625, 0.6076388888888888, 0.9479166666666666],
+        "ui/military/soul-run/22/0": [0.16666666666666666, 0.13541666666666666, 0.6631944444444444, 0.96875],
+        "ui/military/soul-run/22/1": [0.16666666666666666, 0.140625, 0.65625, 0.96875],
+        "ui/military/soul-run/22/2": [0.1701388888888889, 0.140625, 0.6597222222222222, 0.96875],
+        "ui/military/soul-run/22/3": [0.15625, 0.13541666666666666, 0.6631944444444444, 0.9635416666666666],
+        "ui/military/soul-run/22/4": [0.16319444444444445, 0.13541666666666666, 0.6493055555555556, 0.96875],
+        "ui/military/soul-run/22/5": [0.15625, 0.13541666666666666, 0.6631944444444444, 0.96875],
+        "ui/military/soul-run/22/6": [0.15625, 0.13541666666666666, 0.65625, 0.9583333333333334],
+        "ui/military/soul-run/22/7": [0.1597222222222222, 0.13541666666666666, 0.65625, 0.9583333333333334],
+        "ui/military/soul-run/23/0": [0.1597222222222222, 0.140625, 0.6215277777777778, 0.9635416666666666],
+        "ui/military/soul-run/23/1": [0.14583333333333334, 0.140625, 0.6076388888888888, 0.9583333333333334],
+        "ui/military/soul-run/23/2": [0.16666666666666666, 0.140625, 0.6215277777777778, 0.9583333333333334],
+        "ui/military/soul-run/23/3": [0.1423611111111111, 0.13541666666666666, 0.6145833333333334, 0.9635416666666666],
+        "ui/military/soul-run/23/4": [0.14930555555555555, 0.140625, 0.6111111111111112, 0.953125],
+        "ui/military/soul-run/23/5": [0.1388888888888889, 0.13541666666666666, 0.6145833333333334, 0.9583333333333334],
+        "ui/military/soul-run/23/6": [0.15625, 0.13541666666666666, 0.6180555555555556, 0.96875],
+        "ui/military/soul-run/23/7": [0.1527777777777778, 0.140625, 0.6111111111111112, 0.953125],
+        "ui/military/soul-run/24/0": [0.07291666666666667, 0.13020833333333334, 0.5868055555555556, 0.9635416666666666],
+        "ui/military/soul-run/24/1": [0.09722222222222222, 0.13020833333333334, 0.5798611111111112, 0.9583333333333334],
+        "ui/military/soul-run/24/2": [0.09027777777777778, 0.125, 0.5902777777777778, 0.953125],
+        "ui/military/soul-run/24/3": [0.07291666666666667, 0.125, 0.5868055555555556, 0.9583333333333334],
+        "ui/military/soul-run/24/4": [0.08680555555555555, 0.13541666666666666, 0.5972222222222222, 0.9635416666666666],
+        "ui/military/soul-run/24/5": [0.07291666666666667, 0.13020833333333334, 0.6041666666666666, 0.953125],
+        "ui/military/soul-run/24/6": [0.0763888888888889, 0.13541666666666666, 0.5972222222222222, 0.96875],
+        "ui/military/soul-run/24/7": [0.06944444444444445, 0.125, 0.5972222222222222, 0.9322916666666666],
+        "ui/military/soul-run/25/0": [0.06597222222222222, 0.140625, 0.6319444444444444, 0.96875],
+        "ui/military/soul-run/25/1": [0.08333333333333333, 0.140625, 0.6215277777777778, 0.9635416666666666],
+        "ui/military/soul-run/25/2": [0.08680555555555555, 0.13541666666666666, 0.6319444444444444, 0.9583333333333334],
+        "ui/military/soul-run/25/3": [0.08680555555555555, 0.140625, 0.6354166666666666, 0.96875],
+        "ui/military/soul-run/25/4": [0.06944444444444445, 0.140625, 0.6319444444444444, 0.953125],
+        "ui/military/soul-run/25/5": [0.06944444444444445, 0.140625, 0.625, 0.9635416666666666],
+        "ui/military/soul-run/25/6": [0.07291666666666667, 0.140625, 0.6388888888888888, 0.96875],
+        "ui/military/soul-run/25/7": [0.08333333333333333, 0.140625, 0.6319444444444444, 0.9635416666666666],
+        "ui/military/soul-run/26/0": [0.1076388888888889, 0.13020833333333334, 0.6493055555555556, 0.9635416666666666],
+        "ui/military/soul-run/26/1": [0.09375, 0.140625, 0.6319444444444444, 0.96875],
+        "ui/military/soul-run/26/2": [0.09027777777777778, 0.13020833333333334, 0.6458333333333334, 0.953125],
+        "ui/military/soul-run/26/3": [0.09722222222222222, 0.13541666666666666, 0.65625, 0.96875],
+        "ui/military/soul-run/26/4": [0.09722222222222222, 0.11979166666666667, 0.6423611111111112, 0.9583333333333334],
+        "ui/military/soul-run/26/5": [0.09027777777777778, 0.125, 0.6423611111111112, 0.9583333333333334],
+        "ui/military/soul-run/26/6": [0.1076388888888889, 0.13020833333333334, 0.6493055555555556, 0.9635416666666666],
+        "ui/military/soul-run/26/7": [0.10416666666666667, 0.125, 0.6527777777777778, 0.9479166666666666],
+        "ui/military/soul-run/27/0": [0.07291666666666667, 0.15625, 0.6388888888888888, 0.9583333333333334],
+        "ui/military/soul-run/27/1": [0.059027777777777776, 0.16145833333333334, 0.6354166666666666, 0.96875],
+        "ui/military/soul-run/27/2": [0.06597222222222222, 0.15625, 0.6458333333333334, 0.9583333333333334],
+        "ui/military/soul-run/27/3": [0.0798611111111111, 0.15625, 0.6493055555555556, 0.9583333333333334],
+        "ui/military/soul-run/27/4": [0.06597222222222222, 0.15104166666666666, 0.6493055555555556, 0.953125],
+        "ui/military/soul-run/27/5": [0.0625, 0.15625, 0.6319444444444444, 0.9583333333333334],
+        "ui/military/soul-run/27/6": [0.059027777777777776, 0.15625, 0.6423611111111112, 0.953125],
+        "ui/military/soul-run/27/7": [0.07291666666666667, 0.15625, 0.65625, 0.953125],
+        "ui/military/soul-run/28/0": [0.18055555555555555, 0.13020833333333334, 0.5625, 0.9479166666666666],
+        "ui/military/soul-run/28/1": [0.1736111111111111, 0.13020833333333334, 0.5625, 0.9583333333333334],
+        "ui/military/soul-run/28/2": [0.14930555555555555, 0.13020833333333334, 0.5625, 0.953125],
+        "ui/military/soul-run/28/3": [0.1527777777777778, 0.13541666666666666, 0.5555555555555556, 0.96875],
+        "ui/military/soul-run/28/4": [0.15625, 0.13020833333333334, 0.5659722222222222, 0.953125],
+        "ui/military/soul-run/28/5": [0.16319444444444445, 0.125, 0.5590277777777778, 0.9479166666666666],
+        "ui/military/soul-run/28/6": [0.1597222222222222, 0.13020833333333334, 0.5590277777777778, 0.953125],
+        "ui/military/soul-run/28/7": [0.1701388888888889, 0.13020833333333334, 0.5555555555555556, 0.9479166666666666],
+        "ui/military/soul-run/29/0": [0.1527777777777778, 0.14583333333333334, 0.5590277777777778, 0.9635416666666666],
+        "ui/military/soul-run/29/1": [0.1527777777777778, 0.13541666666666666, 0.5555555555555556, 0.96875],
+        "ui/military/soul-run/29/2": [0.12152777777777778, 0.14583333333333334, 0.5520833333333334, 0.9583333333333334],
+        "ui/military/soul-run/29/3": [0.11805555555555555, 0.140625, 0.5520833333333334, 0.96875],
+        "ui/military/soul-run/29/4": [0.13194444444444445, 0.14583333333333334, 0.5625, 0.9635416666666666],
+        "ui/military/soul-run/29/5": [0.1423611111111111, 0.13541666666666666, 0.5520833333333334, 0.953125],
+        "ui/military/soul-run/29/6": [0.13541666666666666, 0.140625, 0.5555555555555556, 0.96875],
+        "ui/military/soul-run/29/7": [0.14583333333333334, 0.140625, 0.5555555555555556, 0.9583333333333334]
+      });
       cclegacy._RF.pop();
     }
   };
@@ -80576,6 +83837,83 @@ System.register("chunks:///_virtual/SoulPortraitArt.ts", ['cc'], function (expor
         "ui/military/head/29": [0, 0, 1, 1],
         "ui/military/profiles/29": [0, 0, 1, 1]
       });
+      cclegacy._RF.pop();
+    }
+  };
+});
+
+System.register("chunks:///_virtual/SoulRunPresentation.ts", ['cc', './WarriorRunArt.ts'], function (exports) {
+  var cclegacy, WARRIOR_RUN_CADENCE;
+  return {
+    setters: [function (module) {
+      cclegacy = module.cclegacy;
+    }, function (module) {
+      WARRIOR_RUN_CADENCE = module.WARRIOR_RUN_CADENCE;
+    }],
+    execute: function () {
+      exports({
+        runClockAfter: runClockAfter,
+        runPoseOffset: runPoseOffset,
+        showRun: showRun,
+        smoothRunAvailable: smoothRunAvailable
+      });
+      cclegacy._RF.push({}, "5376cU+XCxQVZVWqNJ75oLh", "SoulRunPresentation", undefined);
+      /** Per-pose head registration in original 448x192 pixels; no change to world feet. */
+      var SOUL_RUN_OFFSETS = exports('SOUL_RUN_OFFSETS', {
+        "-1": [[1, 0], [-1, 2], [-1, 0], [-1, -1]],
+        "0": [[0, -2], [0, -2], [-1, -2], [-1, 5]],
+        "1": [[0, 0], [1, 0], [0, 0], [0, -1]],
+        "2": [[1, 1], [-1, 0], [0, 1], [-1, 0]],
+        "3": [[0, -1], [0, -1], [1, -1], [0, 2]],
+        "4": [[0, -1], [0, -1], [0, 1], [0, 0]],
+        "5": [[0, 0], [0, 0], [0, 0], [0, 0]],
+        "6": [[0, -1], [0, 1], [0, -1], [0, 1]],
+        "7": [[0, -2], [0, -2], [1, -1], [1, 3]],
+        "8": [[0, 0], [-2, 0], [1, -1], [0, 0]],
+        "9": [[0, 1], [1, 0], [-1, 0], [1, 0]],
+        "10": [[0, 0], [0, 0], [1, 0], [1, 1]],
+        "11": [[0, 0], [1, 0], [0, 0], [-1, 2]],
+        "12": [[-1, 1], [0, -1], [-1, -1], [0, 1]],
+        "13": [[-1, -1], [1, 0], [1, -1], [0, 0]],
+        "14": [[0, -1], [0, -1], [0, -1], [0, 1]],
+        "15": [[-1, 0], [0, 0], [0, 0], [-1, -1]],
+        "16": [[7, 0], [-2, 2], [-1, 0], [-5, -2]],
+        "17": [[0, 0], [-1, 0], [-1, 0], [0, -1]],
+        "18": [[0, -1], [0, 1], [0, 0], [1, 0]],
+        "19": [[-1, -1], [1, -1], [1, -1], [0, 3]],
+        "20": [[-1, 0], [0, 0], [0, -1], [1, -1]],
+        "21": [[2, 1], [2, -1], [0, 0], [-2, 0]],
+        "22": [[0, -1], [1, 1], [2, -1], [-3, 0]],
+        "23": [[0, -1], [0, -1], [0, 0], [0, 0]],
+        "24": [[1, 0], [-1, 0], [0, 0], [0, 0]],
+        "25": [[0, 0], [1, 0], [0, 0], [0, 1]],
+        "26": [[-1, -2], [1, -1], [0, -1], [1, 4]],
+        "27": [[0, -2], [-1, -1], [0, -1], [-1, 3]],
+        "28": [[0, 0], [1, 1], [1, 0], [-1, 0]],
+        "29": [[1, -1], [-1, 2], [1, 0], [0, 0]]
+      });
+      function runClockAfter(clock, dt, moving, id) {
+        var _WARRIOR_RUN_CADENCE$;
+        var value = Number.isFinite(clock) ? clock >= 0 && clock < 1 ? clock : (clock % 1 + 1) % 1 : 0;
+        if (!moving || !Number.isFinite(dt) || dt <= 0) return value;
+        var cadence = id === 2 ? 1.65 : Math.min(1.9, Math.max(1.5, id === null ? 1.8 : (_WARRIOR_RUN_CADENCE$ = WARRIOR_RUN_CADENCE[id]) != null ? _WARRIOR_RUN_CADENCE$ : 1.7));
+        return (value + dt * cadence) % 1;
+      }
+      /** Ignore one stationary render frame at a path corner, then settle promptly. */
+      function showRun(moving, stillSeconds, weight) {
+        return moving || stillSeconds < .055 && weight > .5;
+      }
+      function runPoseOffset(id, pose) {
+        var _SOUL_RUN_OFFSETS, _SOUL_RUN_OFFSETS2;
+        return (_SOUL_RUN_OFFSETS = (_SOUL_RUN_OFFSETS2 = SOUL_RUN_OFFSETS[id != null ? id : -1]) == null ? void 0 : _SOUL_RUN_OFFSETS2[pose - 1]) != null ? _SOUL_RUN_OFFSETS : [0, 0];
+      }
+      /** Switch only when the whole loop is ready; retain the existing art on partial loads. */
+      function smoothRunAvailable(id, frames) {
+        var slot = id != null ? id : -1;
+        if (!Number.isInteger(slot) || slot < -1 || slot >= 30) return false;
+        for (var pose = 0; pose < 8; pose++) if (!frames.has("soul-run/" + slot + "/" + pose)) return false;
+        return true;
+      }
       cclegacy._RF.pop();
     }
   };
@@ -85775,14 +89113,14 @@ System.register("chunks:///_virtual/TitleUI.ts", ['./rollupPluginModLoBabelHelpe
             logoBottom = top - 62 - logoH;
           var heroBottom = actionY + 55,
             stageH = Math.max(140, logoBottom - 16 - heroBottom),
-            middleHeight = Math.min(182, stageH * .56),
-            farHeight = Math.min(92, stageH * .27);
+            middleHeight = Math.min(94, stageH * .34),
+            farHeight = Math.min(72, stageH * .25);
           var heroFrame = a.ui.frames.get('phoenix-portrait'),
             soul = SOUL_ALLY_BOUNDS['ui/military/phoenix-portrait'],
             b = soul ? soul.map(function (v, i) {
               return v * (i % 2 ? heroFrame.rect.height : heroFrame.rect.width);
             }) : PHOENIX_PORTRAIT_BOUNDS,
-            scale = Math.min(stageH / (b[3] - b[1]), 312 / (b[2] - b[0])),
+            scale = Math.min(Math.min(138, stageH * .48) / (b[3] - b[1]), 148 / (b[2] - b[0])),
             heroW = (b[2] - b[0]) * scale,
             heroH = (b[3] - b[1]) * scale;
           var rearFaceMinX = -68 + heroW / 2 + 40;
@@ -87504,8 +90842,8 @@ System.register("chunks:///_virtual/UIFontCatalog.ts", ['cc'], function (exports
   };
 });
 
-System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './DamageIcon.ts', './TitleLogoArt.ts', './TacticSpriteArt.ts', './SkillCatalog.ts', './DownedArt.ts', './SoulEnemyArt.ts', './SoulPortraitArt.ts', './SoulAllyArt.ts', './WeaponEffects.ts', './ThreeKingdomsArt.ts', './NinjaRunArt.ts', './WarriorRunArt.ts', './CaptainRankArt.ts', './PackedUIArt.ts', './SkillIconArt.ts', './DischargeIcon.ts', './Enemies.ts', './EnemyArtBounds.ts', './Mercenaries.ts', './MotionBounds.ts', './ShopTheme.ts', './UIFontCatalog.ts', './EnemyHitFeedback.ts'], function (exports) {
-  var _createForOfIteratorHelperLoose, _createClass, _asyncToGenerator, _regeneratorRuntime, cclegacy, Color, sys, resources, Texture2D, SpriteFrame, Rect, Size, Graphics, UITransform, Node, Mask, Sprite, Vec3, Font, DAMAGE_PASSES, TITLE_LOGO_ART, drawTacticSprite, loadTacticArt, TACTIC_MOTIFS, DOWNED_ART, DOWNED_BOUNDS, SOUL_ENEMY_ART, SOUL_ENEMY_BOUNDS, SOUL_ENEMY_NAMES, SOUL_PORTRAIT_ART, SOUL_PORTRAIT_BOUNDS, SOUL_ALLY_ART, SOUL_ALLY_BOUNDS, WEAPON_EFFECT_FRAME_KEYS, THREE_KINGDOMS_BOUNDS, NINJA_RUN_ART, NINJA_RUN_BOUNDS, WARRIOR_RUN_ART, WARRIOR_RUN_BOUNDS, CAPTAIN_RANK_BOUNDS, PACKED_UI_ART, drawSkillIcon, drawDischargeIcon, ENEMY_TYPES, BOSS_TYPES, ENEMY_ALPHA_BOUNDS, mercenaryWeapon, MERCENARY_COUNT, MOTION_FRAMES, SHOP_ICONS, UI_FONT_KEY, uiFontId, UI_FONTS, enemyHitOffset;
+System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpers.js', 'cc', './EquipmentArt.ts', './DamageIcon.ts', './TitleLogoArt.ts', './TacticSpriteArt.ts', './SkillCatalog.ts', './DownedArt.ts', './SoulEnemyArt.ts', './SoulPortraitArt.ts', './SoulAllyArt.ts', './SmoothRunArt.ts', './WeaponEffects.ts', './ThreeKingdomsArt.ts', './NinjaRunArt.ts', './WarriorRunArt.ts', './CaptainRankArt.ts', './PackedUIArt.ts', './SkillIconArt.ts', './DischargeIcon.ts', './Enemies.ts', './EnemyArtBounds.ts', './Mercenaries.ts', './MotionBounds.ts', './ShopTheme.ts', './UIFontCatalog.ts', './EnemyHitFeedback.ts'], function (exports) {
+  var _createForOfIteratorHelperLoose, _createClass, _asyncToGenerator, _regeneratorRuntime, cclegacy, Color, sys, resources, Texture2D, SpriteFrame, Rect, Size, Graphics, UITransform, Node, Mask, Sprite, Vec3, Font, EQUIPMENT_ART, EQUIPMENT_BOUNDS, DAMAGE_PASSES, TITLE_LOGO_ART, drawTacticSprite, loadTacticArt, TACTIC_MOTIFS, DOWNED_ART, DOWNED_BOUNDS, SOUL_ENEMY_ART, SOUL_ENEMY_BOUNDS, SOUL_ENEMY_NAMES, SOUL_PORTRAIT_ART, SOUL_PORTRAIT_BOUNDS, SOUL_ALLY_ART, SOUL_ALLY_BOUNDS, SMOOTH_RUN_ART, SMOOTH_RUN_BOUNDS, WEAPON_EFFECT_FRAME_KEYS, THREE_KINGDOMS_BOUNDS, NINJA_RUN_ART, NINJA_RUN_BOUNDS, WARRIOR_RUN_ART, WARRIOR_RUN_BOUNDS, CAPTAIN_RANK_BOUNDS, PACKED_UI_ART, drawSkillIcon, drawDischargeIcon, ENEMY_TYPES, BOSS_TYPES, ENEMY_ALPHA_BOUNDS, mercenaryWeapon, MERCENARY_COUNT, MOTION_FRAMES, SHOP_ICONS, UI_FONT_KEY, uiFontId, UI_FONTS, enemyHitOffset;
   return {
     setters: [function (module) {
       _createForOfIteratorHelperLoose = module.createForOfIteratorHelperLoose;
@@ -87529,6 +90867,9 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
       Vec3 = module.Vec3;
       Font = module.Font;
     }, function (module) {
+      EQUIPMENT_ART = module.EQUIPMENT_ART;
+      EQUIPMENT_BOUNDS = module.EQUIPMENT_BOUNDS;
+    }, function (module) {
       DAMAGE_PASSES = module.DAMAGE_PASSES;
     }, function (module) {
       TITLE_LOGO_ART = module.TITLE_LOGO_ART;
@@ -87550,6 +90891,9 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
     }, function (module) {
       SOUL_ALLY_ART = module.SOUL_ALLY_ART;
       SOUL_ALLY_BOUNDS = module.SOUL_ALLY_BOUNDS;
+    }, function (module) {
+      SMOOTH_RUN_ART = module.SMOOTH_RUN_ART;
+      SMOOTH_RUN_BOUNDS = module.SMOOTH_RUN_BOUNDS;
     }, function (module) {
       WEAPON_EFFECT_FRAME_KEYS = module.WEAPON_EFFECT_FRAME_KEYS;
     }, function (module) {
@@ -87889,6 +91233,10 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
                   };
                   _context.next = 10;
                   return Promise.all([].concat(Array.from({
+                    length: 200
+                  }, function (_, i) {
+                    return _this.loadFrame('gear/' + i, 0, false, 'military/gear/' + i);
+                  }), Array.from({
                     length: 36
                   }, function (_, i) {
                     return _this.loadFrame('icons/period-' + i, 0, false, 'military/icon-catalog/' + i);
@@ -87914,6 +91262,8 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
                     }, function (_, f) {
                       return _this.loadFrame("soul/" + id + "/" + f, 0, false, "military/soul/" + id + "/" + f);
                     });
+                  }), Object.keys(SMOOTH_RUN_ART).map(function (key) {
+                    return _this.loadFrame(key.slice(12), 0, false, key.slice(3));
                   }), Array.from({
                     length: 4
                   }, function (_, f) {
@@ -88026,7 +91376,7 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
             source = key;
           }
           var path = source === 'branding' ? 'branding/tt-softs-ci' : "ui/" + (source.startsWith('military/') ? source : 'pastel/' + source),
-            packed = (/^ui\/military\/healing\/([0-7])$/.test(path) ? ['ui/three-kingdoms/healing-loop', Number(path.slice(-1)) % 4 * 260 + 2, Math.floor(Number(path.slice(-1)) / 4) * 260 + 2, 256, 256] : undefined) || TITLE_LOGO_ART[path] || DOWNED_ART[path] || SOUL_ENEMY_ART[path] || SOUL_PORTRAIT_ART[path] || SOUL_ALLY_ART[path] || WARRIOR_RUN_ART[path] || NINJA_RUN_ART[path] || PACKED_UI_ART[path];
+            packed = (/^ui\/military\/healing\/([0-7])$/.test(path) ? ['ui/three-kingdoms/healing-loop', Number(path.slice(-1)) % 4 * 260 + 2, Math.floor(Number(path.slice(-1)) / 4) * 260 + 2, 256, 256] : undefined) || EQUIPMENT_ART[path] || TITLE_LOGO_ART[path] || DOWNED_ART[path] || SOUL_ENEMY_ART[path] || SOUL_PORTRAIT_ART[path] || SMOOTH_RUN_ART[path] || SOUL_ALLY_ART[path] || WARRIOR_RUN_ART[path] || NINJA_RUN_ART[path] || PACKED_UI_ART[path];
           return this.texture(packed ? packed[0] : path).then(function (texture) {
             if (!texture) _this2.missing.push(key);else {
               texture.setFilters(smooth ? Texture2D.Filter.LINEAR : Texture2D.Filter.NEAREST, smooth ? Texture2D.Filter.LINEAR : Texture2D.Filter.NEAREST);
@@ -88060,7 +91410,7 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
                 var _b = MOTION_FRAMES[Number(motion[1])][Number(motion[2])];
                 _this2.frameContent.set(frame, [_b[0] / 448, _b[1] / 192, _b[2] / 448, _b[3] / 192]);
               }
-              var reviewed = DOWNED_BOUNDS[path] || SOUL_ENEMY_BOUNDS[path] || SOUL_PORTRAIT_BOUNDS[path] || SOUL_ALLY_BOUNDS[path] || WARRIOR_RUN_BOUNDS[path] || NINJA_RUN_BOUNDS[path] || THREE_KINGDOMS_BOUNDS[path];
+              var reviewed = EQUIPMENT_BOUNDS[path] || DOWNED_BOUNDS[path] || SOUL_ENEMY_BOUNDS[path] || SOUL_PORTRAIT_BOUNDS[path] || SMOOTH_RUN_BOUNDS[path] || SOUL_ALLY_BOUNDS[path] || WARRIOR_RUN_BOUNDS[path] || NINJA_RUN_BOUNDS[path] || THREE_KINGDOMS_BOUNDS[path];
               if (reviewed) _this2.frameContent.set(frame, reviewed);
             }
           });
@@ -88437,6 +91787,7 @@ System.register("chunks:///_virtual/UITheme.ts", ['./rollupPluginModLoBabelHelpe
           }
           if (/^(tactic|talent|training):/.test(key)) return drawSkillIcon(node, key);
           if (key.startsWith('drones:')) return this.paint(node, 'drones/' + key.slice(7));
+          if (key.startsWith('gear:')) return this.paint(node, 'gear/' + key.slice(5));
           if (key.startsWith('equipment:')) return this.equipmentIcon(node, key.slice(10));
           if (key.startsWith('shop:')) return this.paint(node, 'shop/' + key.slice(5));
           if (key === 'symbol:damage') return this.damageIcon(node, color);

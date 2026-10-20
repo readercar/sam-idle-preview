@@ -1,11 +1,11 @@
 {
   "name": "삼국지 : 방치해서 천하통일",
-  "version": "0.1.3",
-  "builtAt": "2026-10-17T02:32:03.055Z",
+  "version": "0.1.4",
+  "builtAt": "2026-10-20T00:26:37.710Z",
   "engine": "Cocos Creator 3.8.8",
-  "entry": "app.0.1.3.html",
-  "buildVersion": "0.1.3",
+  "entry": "app.0.1.4.html",
+  "buildVersion": "0.1.4",
   "policyVersion": "0.1.0",
-  "sourceCommit": "6b71208a7b30bd740afcd58efd646ebe2b13a853",
-  "tag": "preview-0.1.3"
+  "sourceCommit": "8f204e242dedb2fb515c909ceb689f6009600484",
+  "tag": "preview-0.1.4"
 }
