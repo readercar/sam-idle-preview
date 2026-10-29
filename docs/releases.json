@@ -1,5 +1,20 @@
 [
   {
+    "buildVersion": "0.1.5",
+    "tag": "preview-0.1.5",
+    "sourceCommit": "12a10a766ad62ad5a7b0cd16d9e0a0a82571c45e",
+    "version": "0.1.5",
+    "policyVersion": "0.1.0",
+    "publishedAt": "2026-10-29T07:03:54.433Z",
+    "previousCommit": "0e324af5838c97e5c563fcd4157153e60e71302f",
+    "notes": [
+      "공식 게임명을 방치왕 삼국지 : 방치해서 천하통일로 반영했습니다.",
+      "방치왕과 무장별 짧은 머리 위 대사, 전원8프레임 달리기와 선봉 진형을 반영했습니다.",
+      "황건의 난 초반 병력 성장과 전방 고정10초 화계를 반영했습니다.",
+      "성문 안 마당과 닫힌 문 앞 적장 배치, 적장 처치 후 출구 이동 정체를 수정했습니다."
+    ]
+  },
+  {
     "buildVersion": "0.1.4",
     "tag": "preview-0.1.4",
     "sourceCommit": "8f204e242dedb2fb515c909ceb689f6009600484",

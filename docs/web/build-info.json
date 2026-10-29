@@ -1,11 +1,11 @@
 {
-  "name": "삼국지 : 방치해서 천하통일",
-  "version": "0.1.4",
-  "builtAt": "2026-10-20T00:26:37.710Z",
+  "name": "방치왕 삼국지 : 방치해서 천하통일",
+  "version": "0.1.5",
+  "builtAt": "2026-10-29T07:03:54.656Z",
   "engine": "Cocos Creator 3.8.8",
-  "entry": "app.0.1.4.html",
-  "buildVersion": "0.1.4",
+  "entry": "app.0.1.5.html",
+  "buildVersion": "0.1.5",
   "policyVersion": "0.1.0",
-  "sourceCommit": "8f204e242dedb2fb515c909ceb689f6009600484",
-  "tag": "preview-0.1.4"
+  "sourceCommit": "12a10a766ad62ad5a7b0cd16d9e0a0a82571c45e",
+  "tag": "preview-0.1.5"
 }
